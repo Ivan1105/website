@@ -90,7 +90,7 @@
                 </v-img>
                 <v-icon v-else icon="mdi-account-outline" size="24" aria-hidden="true" />
               </v-avatar>
-              <div>
+              <div class="user-identity-text">
                 <strong>{{ user.nickname || user.username }}</strong>
                 <span>@{{ user.username }}</span>
               </div>
@@ -112,25 +112,37 @@
               </v-chip>
             </div>
 
-            <div class="user-field">
+            <div class="user-field status-field">
               <span class="user-field-label">状态</span>
               <v-switch
                 v-if="user.role !== 'admin'"
                 :key="`${user.user_id}-${user.is_active}-${activeControlVersion}`"
+                class="status-switch"
+                :class="{ 'status-switch-inactive': !user.is_active }"
                 :model-value="user.is_active"
-                :label="user.is_active ? '已启用' : '已停用'"
-                :color="user.is_active ? 'success' : 'error'"
+                color="primary"
                 :loading="activeLoading && activeTarget?.user_id === user.user_id"
                 :disabled="activeLoading"
+                size="small"
                 density="compact"
                 hide-details
-                inset
-                :aria-label="`${user.username}：${user.is_active ? '停用用户' : '启用用户'}`"
+                :aria-label="`${user.username} 当前${user.is_active ? '已启用，点击停用' : '已停用，点击启用'}`"
+                :title="user.is_active ? '已启用，点击停用' : '已停用，点击启用'"
                 @update:model-value="value => openActiveConfirm(user, value)"
               />
-              <v-chip v-else :color="user.is_active ? 'success' : 'error'" size="small" variant="tonal">
-                {{ user.is_active ? '已启用' : '已停用' }}
-              </v-chip>
+              <v-switch
+                v-else
+                class="status-switch status-switch-readonly"
+                :class="{ 'status-switch-inactive': !user.is_active }"
+                :model-value="user.is_active"
+                color="primary"
+                size="small"
+                density="compact"
+                hide-details
+                disabled
+                :aria-label="`${user.username} 当前${user.is_active ? '已启用' : '已停用'}，不可修改`"
+                :title="`${user.is_active ? '已启用' : '已停用'}，管理员状态不可修改`"
+              />
             </div>
 
             <div class="user-field user-last-login">
@@ -676,7 +688,7 @@ onMounted(async () => {
 .users-table-header,
 .user-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 90px 110px 100px minmax(150px, 0.7fr) 120px;
+  grid-template-columns: minmax(220px, 1fr) 90px 110px 72px minmax(150px, 0.7fr) 120px;
   align-items: center;
   gap: var(--site-space-2);
   padding-inline: clamp(24px, 4vw, 36px);
@@ -707,7 +719,7 @@ onMounted(async () => {
   color: var(--site-accent);
 }
 
-.user-identity > div {
+.user-identity > text {
   min-width: 0;
   display: grid;
 }
@@ -734,14 +746,19 @@ onMounted(async () => {
   min-width: 0;
 }
 
-.user-field :deep(.v-switch) {
-  width: max-content;
+.status-field {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
 }
 
-.user-field :deep(.v-label) {
-  color: var(--site-muted);
-  font-size: 0.8rem;
-  opacity: 1;
+.status-field :deep(.v-switch) {
+  width: max-content;
+  justify-self: start;
+}
+
+.status-switch-inactive :deep(.v-switch__track) {
+  background-color: rgba(var(--v-theme-on-surface), 0.24) !important;
 }
 
 .user-field-label {
