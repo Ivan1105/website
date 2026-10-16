@@ -60,6 +60,12 @@
                     aria-label="自动记录日记" @click.stop @update:model-value="updateJournal" />
                 </template>
               </v-list-item>
+              <v-list-item class="chat-setting-item" prepend-icon="mdi-email-outline" @click="openEmailConfigDialog">
+                <v-list-item-title>配置邮箱连接</v-list-item-title>
+                <v-list-item-subtitle class="chat-setting-description">
+                  连接邮箱后，可获取最新邮件并总结邮件内容。
+                </v-list-item-subtitle>
+              </v-list-item>
               <v-divider />
               <v-list-item class="chat-setting-item" prepend-icon="mdi-chat-plus-outline" :disabled="conversationSelectionDisabled"
                 @click="openClearContextDialog">
@@ -175,6 +181,122 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+    <v-dialog v-model="emailConfigDialogOpen" :persistent="mailConfigBusy" fullscreen transition="dialog-bottom-transition">
+      <v-card class="email-config-page">
+        <v-toolbar class="email-config-toolbar" color="surface" flat>
+          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="mailConfigBusy"
+            @click="closeEmailConfigDialog" />
+          <v-toolbar-title>配置邮箱连接</v-toolbar-title>
+          <v-btn icon="mdi-close" variant="text" aria-label="关闭邮箱连接配置" :disabled="mailConfigBusy"
+            @click="closeEmailConfigDialog" />
+        </v-toolbar>
+        <v-divider />
+        <v-card-text class="email-config-content">
+          <div class="email-config-shell">
+            <header class="email-config-intro">
+              <span class="email-config-icon" aria-hidden="true">
+                <v-icon icon="mdi-email-sync-outline" color="secondary" size="38" />
+              </span>
+              <div>
+                <p class="eyebrow">EMAIL CONNECTION</p>
+                <h2>连接你的邮箱</h2>
+                <p>配置邮箱服务器后，可以获取最新邮件并总结邮件内容。</p>
+              </div>
+            </header>
+
+            <div v-if="mailConfigLoading" class="email-config-state" role="status">
+              <v-progress-circular indeterminate color="secondary" size="30" width="2" />
+              <p>正在读取邮箱配置…</p>
+            </div>
+
+            <div v-else-if="mailConfigLoadError" class="email-config-state" role="alert">
+              <v-icon icon="mdi-alert-circle-outline" color="error" size="32" />
+              <h3>暂时无法读取配置</h3>
+              <p>{{ mailConfigLoadError }}</p>
+              <v-btn color="secondary" variant="tonal" prepend-icon="mdi-refresh" @click="loadMailConfig">
+                重新加载
+              </v-btn>
+            </div>
+
+            <v-form v-else class="email-config-form" @submit.prevent="saveMailConfig">
+              <div class="email-config-status" aria-live="polite">
+                <v-icon :icon="mailConfig ? 'mdi-check-circle-outline' : 'mdi-information-outline'"
+                  :color="mailConfig ? 'success' : 'secondary'" size="24" />
+                <div>
+                  <strong>{{ mailConfig ? '邮箱连接已配置' : '尚未配置邮箱连接' }}</strong>
+                  <span v-if="mailConfig">最近更新：{{ mailConfigUpdatedAt }}</span>
+                  <span v-else>填写连接信息并保存后即可启用。</span>
+                </div>
+              </div>
+
+              <v-alert v-if="mailConfigSuccess" type="success" variant="tonal" density="comfortable">
+                {{ mailConfigSuccess }}
+              </v-alert>
+              <v-alert v-if="mailConfigSaveError" type="error" variant="tonal" density="comfortable" role="alert">
+                {{ mailConfigSaveError }}
+              </v-alert>
+
+              <v-select v-model="mailForm.endpointKey" :items="mailEndpointOptions" item-title="title" item-value="key"
+                class="email-endpoint-select" label="邮箱服务器" placeholder="请选择邮箱服务器"
+                prepend-inner-icon="mdi-server-outline" variant="outlined" color="secondary"
+                no-data-text="暂无可用邮箱服务器" :disabled="mailConfigBusy || !mailEndpoints.length"
+                :error-messages="mailFieldMessages('endpoint')" @blur="mailTouched.endpoint = true">
+                <template #selection>
+                  <span v-if="selectedMailEndpointHost" class="email-endpoint-selection">
+                    <span class="email-endpoint-host">{{ selectedMailEndpointHost }}</span>
+                    <span class="email-endpoint-meta">{{ selectedMailEndpointMeta }}</span>
+                  </span>
+                </template>
+                <template #item="{ props, item }">
+                  <v-list-item v-bind="props" class="email-endpoint-option" :title="item.title"
+                    :subtitle="item.subtitle" />
+                </template>
+              </v-select>
+
+              <v-alert v-if="!mailEndpoints.length" type="warning" variant="tonal" density="comfortable">
+                暂无可用邮箱服务器，请稍后重试。
+              </v-alert>
+
+              <v-text-field v-model="mailForm.username" label="邮箱用户名" placeholder="name@example.com"
+                prepend-inner-icon="mdi-account-outline" autocomplete="username" :disabled="mailConfigBusy"
+                :error-messages="mailFieldMessages('username')" @blur="mailTouched.username = true" />
+
+              <v-text-field v-model="mailForm.password"
+                :label="mailConfig?.hasPassword ? '新密码（可选）' : '邮箱密码'"
+                :placeholder="mailConfig?.hasPassword ? '留空则保留当前密码' : '请输入邮箱密码'"
+                :type="mailPasswordVisible ? 'text' : 'password'" prepend-inner-icon="mdi-lock-outline"
+                autocomplete="new-password" :disabled="mailConfigBusy" :error-messages="mailFieldMessages('password')"
+                @blur="mailTouched.password = true">
+                <template #append-inner>
+                  <v-btn :icon="mailPasswordVisible ? 'mdi-eye-off-outline' : 'mdi-eye-outline'" variant="text"
+                    width="44" height="44" :aria-label="mailPasswordVisible ? '隐藏邮箱密码' : '显示邮箱密码'"
+                    :aria-pressed="mailPasswordVisible" :disabled="mailConfigBusy"
+                    @click="mailPasswordVisible = !mailPasswordVisible" />
+                </template>
+              </v-text-field>
+
+              <p v-if="mailConfig?.hasPassword" class="email-password-note">
+                <v-icon icon="mdi-shield-check-outline" size="18" color="success" />
+                已保存邮箱密码；仅在需要更换密码时填写此项。
+              </p>
+
+              <div class="email-config-actions">
+                <v-btn v-if="mailConfig" class="email-config-test-button" color="secondary" variant="tonal"
+                  prepend-icon="mdi-connection" :loading="mailConnectionTesting" :disabled="mailConfigBusy"
+                  @click="testMailConnection">
+                  测试连接
+                </v-btn>
+                <v-btn variant="text" :disabled="mailConfigBusy" @click="closeEmailConfigDialog">取消</v-btn>
+                <v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline"
+                  :loading="mailConfigSaving" :disabled="!canSaveMailConfig">
+                  保存配置
+                </v-btn>
+              </div>
+            </v-form>
+          </div>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
     <v-snackbar v-model="snackbar.show" :timeout="snackbar.timeout" class="site-snackbar" location="bottom">
       <span role="alert"><v-icon icon="mdi-alert-circle-outline" size="18" /> {{ snackbar.text }}</span>
       <template #actions><v-btn variant="text" @click="snackbar.show = false">关闭</v-btn></template>
@@ -183,7 +305,7 @@
 </template>
 
 <script setup lang="ts">
-import { isApiError, useChatApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type MessageDTO } from '@/api'
+import { isApiError, useChatApi, useMailApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type MailConfigDTO, type MailEndpointDTO, type MessageDTO, type UpdateMailConfigReq } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useDisplay } from 'vuetify'
 import DOMPurify from 'isomorphic-dompurify'
@@ -191,10 +313,23 @@ import MarkdownIt from 'markdown-it'
 
 useSeoMeta({ title: '聊天 · Ivan1105' })
 const { chatApi } = useChatApi()
+const { mailApi } = useMailApi()
 const appStore = useAppStore()
 const { mobile } = useDisplay()
 const { assetUrl } = useAssetUrl()
 type ToolCallStatus = 'running' | 'success' | 'error'
+type MailField = 'endpoint' | 'username' | 'password'
+interface MailConfigForm {
+  endpointKey: string
+  username: string
+  password: string
+}
+interface MailEndpointOption {
+  key: string
+  title: string
+  subtitle: string
+  endpoint: MailEndpointDTO
+}
 interface ToolCallState {
   id: string
   name: string
@@ -241,6 +376,26 @@ const messagesTotal = ref(0)
 const activeRunId = ref<string | null>(null)
 const creatingThread = ref(false)
 const clearContextDialogOpen = ref(false)
+const emailConfigDialogOpen = ref(false)
+const mailConfig = ref<MailConfigDTO | null>(null)
+const mailEndpoints = ref<MailEndpointDTO[]>([])
+const mailConfigLoading = ref(false)
+const mailConfigSaving = ref(false)
+const mailConnectionTesting = ref(false)
+const mailConfigLoadError = ref('')
+const mailConfigSaveError = ref('')
+const mailConfigSuccess = ref('')
+const mailPasswordVisible = ref(false)
+const mailForm = reactive<MailConfigForm>({
+  endpointKey: '',
+  username: '',
+  password: '',
+})
+const mailTouched = reactive<Record<MailField, boolean>>({
+  endpoint: false,
+  username: false,
+  password: false,
+})
 const settingsMenuOpen = ref(false)
 const proactiveUpdating = ref(false)
 const journalUpdating = ref(false)
@@ -250,13 +405,65 @@ const showError = (text: string) => {
   snackbar.text = text
   snackbar.show = true
 }
+const mailEndpointKey = (endpoint: Pick<MailEndpointDTO, 'host' | 'port' | 'secure'>) => {
+  return `${endpoint.host}\u0000${endpoint.port}\u0000${endpoint.secure ? '1' : '0'}`
+}
 const currentConversation = computed(() => conversations.value.find(c => c.name === currentConversationId.value))
+const mailEndpointOptions = computed<MailEndpointOption[]>(() => mailEndpoints.value.map(endpoint => ({
+  key: mailEndpointKey(endpoint),
+  title: endpoint.host,
+  subtitle: `${endpoint.port} · ${endpoint.secure ? 'TLS' : '非 TLS'}`,
+  endpoint,
+})))
+const selectedMailEndpoint = computed(() => {
+  return mailEndpointOptions.value.find(option => option.key === mailForm.endpointKey)?.endpoint ?? null
+})
+const selectedMailEndpointHost = computed(() => selectedMailEndpoint.value?.host ?? '')
+const selectedMailEndpointMeta = computed(() => {
+  const endpoint = selectedMailEndpoint.value
+  return endpoint ? `${endpoint.port} · ${endpoint.secure ? 'TLS' : '非 TLS'}` : ''
+})
+const normalizedMailUsername = computed(() => mailForm.username.trim())
+const mailValidationErrors = computed<Record<MailField, string | null>>(() => ({
+  endpoint: selectedMailEndpoint.value ? null : '请选择邮箱服务器。',
+  username: normalizedMailUsername.value ? null : '请输入邮箱用户名。',
+  password: !mailConfig.value?.hasPassword && mailForm.password.length === 0 ? '首次配置必须填写邮箱密码。' : null,
+}))
+const mailFormDirty = computed(() => {
+  if (!mailConfig.value) return true
+  const endpoint = selectedMailEndpoint.value
+  return !endpoint
+    || endpoint.host !== mailConfig.value.host
+    || endpoint.port !== mailConfig.value.port
+    || endpoint.secure !== mailConfig.value.secure
+    || normalizedMailUsername.value !== mailConfig.value.username
+    || mailForm.password.length > 0
+})
+const mailConfigBusy = computed(() => mailConfigSaving.value || mailConnectionTesting.value)
+const mailFormValid = computed(() => Object.values(mailValidationErrors.value).every(error => !error))
+const canSaveMailConfig = computed(() => !mailConfigLoading.value
+  && !mailConfigBusy.value
+  && mailFormDirty.value
+  && mailFormValid.value)
+const mailConfigUpdatedAt = computed(() => {
+  if (!mailConfig.value?.updatedAt) return '未知时间'
+  const date = new Date(mailConfig.value.updatedAt)
+  if (Number.isNaN(date.getTime())) return mailConfig.value.updatedAt
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+})
 const busy = computed(() => authRequired.value || sending.value || creatingThread.value || loading.value || conversationsLoading.value)
 const conversationSelectionDisabled = computed(() => authRequired.value || creatingThread.value || loading.value || conversationsLoading.value)
 const historyLoaderLabel = computed(() => `加载更早的消息，当前已显示 ${currentMessages.value.length} 条，共 ${messagesTotal.value} 条`)
 const MESSAGES_PAGE_SIZE = 20
 let messagesLoadVersion = 0
 let streamVersion = 0
+let mailConfigLoadVersion = 0
 let streamAbortController: AbortController | null = null
 const activeStreamMessageKeys = new Set<string>()
 watch(mobile, value => {
@@ -316,6 +523,156 @@ const handleUnauthorized = (error: unknown) => {
   conversationsError.value = ''
   messagesError.value = ''
   return true
+}
+
+const resetMailTouched = () => {
+  mailTouched.endpoint = false
+  mailTouched.username = false
+  mailTouched.password = false
+}
+
+const applyMailConfig = (config: MailConfigDTO | null) => {
+  mailConfig.value = config
+  const configKey = config ? mailEndpointKey(config) : ''
+  const matchesConfig = mailEndpointOptions.value.some(option => option.key === configKey)
+  const onlyEndpoint = !config && mailEndpointOptions.value.length === 1 ? mailEndpointOptions.value[0] : undefined
+  mailForm.endpointKey = matchesConfig ? configKey : (onlyEndpoint?.key ?? '')
+  mailForm.username = config?.username ?? ''
+  mailForm.password = ''
+  mailPasswordVisible.value = false
+  resetMailTouched()
+}
+
+const mailFieldMessages = (field: MailField) => {
+  const message = mailValidationErrors.value[field]
+  return mailTouched[field] && message ? [message] : []
+}
+
+const touchAllMailFields = () => {
+  mailTouched.endpoint = true
+  mailTouched.username = true
+  mailTouched.password = true
+}
+
+const loadMailConfig = async () => {
+  const loadVersion = ++mailConfigLoadVersion
+  mailConfigLoading.value = true
+  mailConfigLoadError.value = ''
+  mailConfigSaveError.value = ''
+  mailConfigSuccess.value = ''
+
+  try {
+    const [config, endpoints] = await Promise.all([
+      mailApi.getConfig(),
+      mailApi.getEndpoints(),
+    ])
+    if (loadVersion !== mailConfigLoadVersion || !emailConfigDialogOpen.value) return
+    mailEndpoints.value = endpoints
+    applyMailConfig(config)
+  } catch (error) {
+    if (loadVersion !== mailConfigLoadVersion) return
+    if (handleUnauthorized(error)) {
+      emailConfigDialogOpen.value = false
+      return
+    }
+    mailConfigLoadError.value = isApiError(error) ? error.message : '邮箱配置或服务器列表加载失败，请稍后重试。'
+  } finally {
+    if (loadVersion === mailConfigLoadVersion) mailConfigLoading.value = false
+  }
+}
+
+const persistMailConfig = async (): Promise<boolean> => {
+  if (!mailFormValid.value) {
+    touchAllMailFields()
+    return false
+  }
+  const endpoint = selectedMailEndpoint.value
+  if (!endpoint) {
+    mailTouched.endpoint = true
+    return false
+  }
+
+  const req: UpdateMailConfigReq = {
+    host: endpoint.host,
+    port: endpoint.port,
+    secure: endpoint.secure,
+    username: normalizedMailUsername.value,
+  }
+  if (mailForm.password.length > 0) req.password = mailForm.password
+
+  try {
+    await mailApi.updateConfig(req)
+    const config = await mailApi.getConfig()
+    if (!config) throw new Error('保存后未读取到邮箱配置。')
+    applyMailConfig(config)
+    return true
+  } catch (error) {
+    if (handleUnauthorized(error)) {
+      emailConfigDialogOpen.value = false
+      return false
+    }
+    mailConfigSaveError.value = isApiError(error) ? error.message : '邮箱配置保存失败，请稍后重试。'
+    return false
+  }
+}
+
+const saveMailConfig = async () => {
+  if (mailConfigBusy.value || mailConfigLoading.value || !mailFormDirty.value) return
+  if (!mailFormValid.value) {
+    touchAllMailFields()
+    return
+  }
+
+  mailConfigSaving.value = true
+  mailConfigSaveError.value = ''
+  mailConfigSuccess.value = ''
+
+  try {
+    if (await persistMailConfig()) mailConfigSuccess.value = '邮箱连接配置已保存。'
+  } finally {
+    mailConfigSaving.value = false
+  }
+}
+
+const testMailConnection = async () => {
+  if (!mailConfig.value || mailConfigBusy.value || mailConfigLoading.value) return
+  if (mailFormDirty.value && !mailFormValid.value) {
+    touchAllMailFields()
+    return
+  }
+
+  mailConnectionTesting.value = true
+  mailConfigSaveError.value = ''
+  mailConfigSuccess.value = ''
+  let configSaved = false
+
+  try {
+    if (mailFormDirty.value) {
+      mailConfigSaving.value = true
+      try {
+        configSaved = await persistMailConfig()
+      } finally {
+        mailConfigSaving.value = false
+      }
+      if (!configSaved) return
+    }
+
+    const result = await mailApi.testConnection()
+    if (result.connected) {
+      mailConfigSuccess.value = '邮箱连接测试成功。'
+    } else {
+      mailConfigSaveError.value = configSaved ? '配置已保存，但连接测试失败。' : '邮箱连接测试失败。'
+    }
+  } catch (error) {
+    if (handleUnauthorized(error)) {
+      emailConfigDialogOpen.value = false
+      return
+    }
+    const message = isApiError(error) ? error.message : '邮箱连接测试失败，请稍后重试。'
+    mailConfigSaveError.value = configSaved ? `配置已保存，但连接测试失败：${message}` : message
+  } finally {
+    mailConnectionTesting.value = false
+  }
 }
 
 const loadConversations = async () => {
@@ -654,6 +1011,22 @@ const openClearContextDialog = () => {
   clearContextDialogOpen.value = true
 }
 
+const openEmailConfigDialog = () => {
+  settingsMenuOpen.value = false
+  emailConfigDialogOpen.value = true
+  void loadMailConfig()
+}
+
+const closeEmailConfigDialog = () => {
+  if (mailConfigBusy.value) return
+  mailConfigLoadVersion += 1
+  emailConfigDialogOpen.value = false
+  mailConfigLoadError.value = ''
+  mailConfigSaveError.value = ''
+  mailConfigSuccess.value = ''
+  mailPasswordVisible.value = false
+}
+
 const clearContext = async () => {
   const conversation = currentConversation.value
   if (!conversation || creatingThread.value) return
@@ -852,6 +1225,178 @@ onBeforeUnmount(stopActiveStream)
 
 .settings-toggle-item :deep(.v-switch) {
   flex: 0 0 auto;
+}
+
+.email-config-page {
+  display: flex;
+  flex-direction: column;
+  background: var(--site-bg) !important;
+  border-radius: 0 !important;
+}
+
+.email-config-toolbar {
+  flex: 0 0 auto;
+  border-bottom: 0;
+}
+
+.email-config-toolbar :deep(.v-toolbar-title) {
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.email-config-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 40px 24px;
+}
+
+.email-config-shell {
+  width: min(720px, 100%);
+  margin: 0 auto;
+}
+
+.email-config-intro {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.email-config-icon {
+  width: 72px;
+  height: 72px;
+  flex: 0 0 72px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--site-soft);
+}
+
+.email-config-intro h2 {
+  margin-top: 6px;
+  font-size: 1.5rem;
+  font-weight: 650;
+}
+
+.email-config-intro > div > p:last-child {
+  margin-top: 8px;
+  color: var(--site-muted);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.email-config-state {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  color: var(--site-muted);
+}
+
+.email-config-state h3 {
+  color: var(--site-text);
+  font-size: 1.1rem;
+}
+
+.email-config-state .v-btn {
+  margin-top: 6px;
+}
+
+.email-config-form {
+  display: grid;
+  gap: 18px;
+}
+
+.email-config-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+  background: var(--site-surface);
+}
+
+.email-config-status > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.email-config-status strong {
+  font-size: 0.9rem;
+}
+
+.email-config-status span {
+  color: var(--site-muted);
+  font-size: 0.75rem;
+}
+
+.email-endpoint-select :deep(.v-field__input),
+.email-endpoint-select :deep(.v-select__selection) {
+  min-width: 0;
+}
+
+.email-endpoint-select :deep(.v-select__selection) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.email-endpoint-selection {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.email-endpoint-host {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-endpoint-meta {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--site-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.email-endpoint-option :deep(.v-list-item-subtitle) {
+  margin-top: 2px;
+  color: var(--site-muted);
+  font-size: 0.75rem;
+}
+
+.email-password-note {
+  color: var(--site-muted);
+  font-size: 0.75rem;
+}
+
+.email-password-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: -8px;
+}
+
+.email-config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.email-config-test-button {
+  margin-right: auto;
 }
 
 .messages-area {
@@ -1290,6 +1835,32 @@ onBeforeUnmount(stopActiveStream)
   }
   .chat-state p {
     font-size: 0.8rem;
+  }
+  .email-config-content {
+    padding: 24px 20px max(24px, env(safe-area-inset-bottom));
+  }
+  .email-config-intro {
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .email-config-icon {
+    width: 56px;
+    height: 56px;
+    flex-basis: 56px;
+  }
+  .email-config-intro h2 {
+    font-size: 1.25rem;
+  }
+  .email-config-actions .v-btn:last-child {
+    flex: 1;
+  }
+  .email-config-actions {
+    flex-wrap: wrap;
+  }
+  .email-config-test-button {
+    width: 100%;
+    margin-right: 0;
   }
 }
 

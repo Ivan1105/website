@@ -28,6 +28,9 @@ export type {
 export { useCommonApi } from './common'
 export type { ImageUploadModule, UploadImageDTO } from './common'
 
+export { useMailApi } from './mail'
+export type { MailConfigDTO, MailEndpointDTO, MailTestResultDTO, UpdateMailConfigReq } from './mail'
+
 export { useAccountApi } from './account'
 export type { AccountInfoDTO, UpdateAccountInfoReq } from './account'
 
