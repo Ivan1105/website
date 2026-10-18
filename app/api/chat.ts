@@ -5,7 +5,7 @@ export interface ConversationDTO {
   name: string
   display_name: string
   avatar: string
-  thread_id: string
+  thread_id?: string
   proactive_enabled: boolean
   journal_enabled: boolean
 }
@@ -47,7 +47,7 @@ export interface QueryMessagesDTO {
 export interface SendMessageReq {
   content: string
   agentId: string
-  threadId: string
+  threadId?: string
 }
 
 export interface SendMessageDTO {

@@ -31,6 +31,9 @@ export type { ImageUploadModule, UploadImageDTO } from './common'
 export { useMailApi } from './mail'
 export type { MailConfigDTO, MailEndpointDTO, MailTestResultDTO, UpdateMailConfigReq } from './mail'
 
+export { useOAuthApi } from './oauth'
+export type { OAuthAuthorizeDTO, OAuthServiceDTO } from './oauth'
+
 export { useAccountApi } from './account'
 export type { AccountInfoDTO, UpdateAccountInfoReq } from './account'
 

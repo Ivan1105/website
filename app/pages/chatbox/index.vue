@@ -66,6 +66,12 @@
                   连接邮箱后，可获取最新邮件并总结邮件内容。
                 </v-list-item-subtitle>
               </v-list-item>
+              <v-list-item class="chat-setting-item" prepend-icon="mdi-shield-key-outline" @click="openThirdPartyAuthDialog">
+                <v-list-item-title>第三方服务授权</v-list-item-title>
+                <v-list-item-subtitle class="chat-setting-description">
+                  授权第三方服务后，可在对话中使用对应的服务能力。
+                </v-list-item-subtitle>
+              </v-list-item>
               <v-divider />
               <v-list-item class="chat-setting-item" prepend-icon="mdi-chat-plus-outline" :disabled="conversationSelectionDisabled"
                 @click="openClearContextDialog">
@@ -128,7 +134,7 @@
                   <v-img v-if="msg.role === 'user' && appStore.userInfo?.avatar" :src="assetUrl(appStore.userInfo.avatar)" alt="" cover>
                     <template #error><v-icon icon="mdi-account-outline" size="18" /></template>
                   </v-img>
-                  <v-img v-else-if="currentConversation?.avatar" :src="assetUrl(currentConversation.avatar)" alt="" cover>
+                  <v-img v-else-if="msg.role !== 'user' && currentConversation?.avatar" :src="assetUrl(currentConversation.avatar)" alt="" cover>
                     <template #error><v-icon icon="mdi-chat-outline" size="18" color="secondary" /></template>
                   </v-img>
                   <v-icon v-else :icon="msg.role === 'user' ? 'mdi-account-outline' : 'mdi-chat-outline'" size="18"
@@ -297,6 +303,94 @@
         </v-card-text>
       </v-card>
     </v-dialog>
+    <v-dialog v-model="thirdPartyAuthDialogOpen" :persistent="oauthAuthorizingAppKey !== null" fullscreen
+      transition="dialog-bottom-transition">
+      <v-card class="email-config-page">
+        <v-toolbar class="email-config-toolbar" color="surface" flat>
+          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="oauthAuthorizingAppKey !== null"
+            @click="closeThirdPartyAuthDialog" />
+          <v-toolbar-title>第三方服务授权</v-toolbar-title>
+          <v-btn icon="mdi-close" variant="text" aria-label="关闭第三方服务授权"
+            :disabled="oauthAuthorizingAppKey !== null" @click="closeThirdPartyAuthDialog" />
+        </v-toolbar>
+        <v-divider />
+        <v-card-text class="email-config-content">
+          <div class="email-config-shell">
+            <header class="email-config-intro">
+              <span class="email-config-icon" aria-hidden="true">
+                <v-icon icon="mdi-connection" color="secondary" size="38" />
+              </span>
+              <div>
+                <p class="eyebrow">THIRD-PARTY SERVICES</p>
+                <h2>连接第三方服务</h2>
+                <p>授权外部服务，为对话扩展更多可用能力。</p>
+              </div>
+            </header>
+
+            <div v-if="oauthServicesLoading" class="email-config-state" role="status">
+              <v-progress-circular indeterminate color="secondary" size="30" width="2" />
+              <p>正在读取第三方服务…</p>
+            </div>
+
+            <div v-else-if="oauthServicesError" class="email-config-state" role="alert">
+              <v-icon icon="mdi-alert-circle-outline" color="error" size="32" />
+              <h3>暂时无法读取服务</h3>
+              <p>{{ oauthServicesError }}</p>
+              <v-btn color="secondary" variant="tonal" prepend-icon="mdi-refresh" @click="loadOAuthServices">
+                重新加载
+              </v-btn>
+            </div>
+
+            <div v-else-if="!oauthServices.length" class="email-config-state" role="status">
+              <v-icon icon="mdi-connection" color="secondary" size="38" />
+              <h3>暂无可用服务</h3>
+              <p>当前没有可授权的第三方服务，请稍后再来看看。</p>
+            </div>
+
+            <div v-else class="oauth-service-list" aria-label="第三方服务列表">
+              <article v-for="service in oauthServices" :key="service.appKey" class="oauth-service-row">
+                <div class="oauth-service-main">
+                  <div class="oauth-service-heading">
+                    <div class="oauth-service-title">
+                      <h3>{{ service.displayName }}</h3>
+                      <span>{{ service.appKey }}</span>
+                    </div>
+                    <v-chip :color="service.connected ? 'success' : undefined" variant="tonal" size="small"
+                      :prepend-icon="service.connected ? 'mdi-check-circle-outline' : 'mdi-link-off'">
+                      {{ service.connected ? '已连接' : '未连接' }}
+                    </v-chip>
+                  </div>
+
+                  <dl v-if="service.status || service.scope || service.expiresAt" class="oauth-service-meta">
+                    <div v-if="service.status">
+                      <dt>状态</dt>
+                      <dd>{{ service.status }}</dd>
+                    </div>
+                    <div v-if="service.scope">
+                      <dt>授权范围</dt>
+                      <dd>{{ service.scope }}</dd>
+                    </div>
+                    <div v-if="service.expiresAt">
+                      <dt>到期时间</dt>
+                      <dd>{{ formatOAuthExpiresAt(service.expiresAt) }}</dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <v-btn class="oauth-service-action" :color="service.connected ? 'success' : 'primary'"
+                  :variant="service.connected ? 'tonal' : 'flat'" :prepend-icon="service.connected ? 'mdi-check' : 'mdi-open-in-new'"
+                  :loading="oauthAuthorizingAppKey === service.appKey"
+                  :disabled="service.connected || oauthAuthorizingAppKey !== null"
+                  :title="service.connected ? '该服务已完成授权' : '将在新标签页中打开授权页面'"
+                  @click="authorizeOAuthService(service)">
+                  {{ service.connected ? '已授权' : '授权' }}
+                </v-btn>
+              </article>
+            </div>
+          </div>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
     <v-snackbar v-model="snackbar.show" :timeout="snackbar.timeout" class="site-snackbar" location="bottom">
       <span role="alert"><v-icon icon="mdi-alert-circle-outline" size="18" /> {{ snackbar.text }}</span>
       <template #actions><v-btn variant="text" @click="snackbar.show = false">关闭</v-btn></template>
@@ -305,7 +399,7 @@
 </template>
 
 <script setup lang="ts">
-import { isApiError, useChatApi, useMailApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type MailConfigDTO, type MailEndpointDTO, type MessageDTO, type UpdateMailConfigReq } from '@/api'
+import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type MailConfigDTO, type MailEndpointDTO, type MessageDTO, type OAuthServiceDTO, type UpdateMailConfigReq } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useDisplay } from 'vuetify'
 import DOMPurify from 'isomorphic-dompurify'
@@ -314,6 +408,7 @@ import MarkdownIt from 'markdown-it'
 useSeoMeta({ title: '聊天 · Ivan1105' })
 const { chatApi } = useChatApi()
 const { mailApi } = useMailApi()
+const { oauthApi } = useOAuthApi()
 const appStore = useAppStore()
 const { mobile } = useDisplay()
 const { assetUrl } = useAssetUrl()
@@ -377,6 +472,12 @@ const activeRunId = ref<string | null>(null)
 const creatingThread = ref(false)
 const clearContextDialogOpen = ref(false)
 const emailConfigDialogOpen = ref(false)
+const thirdPartyAuthDialogOpen = ref(false)
+const oauthServices = ref<OAuthServiceDTO[]>([])
+const oauthServicesLoading = ref(false)
+const oauthServicesError = ref('')
+const oauthAuthorizingAppKey = ref<string | null>(null)
+const oauthRefreshOnFocus = ref(false)
 const mailConfig = ref<MailConfigDTO | null>(null)
 const mailEndpoints = ref<MailEndpointDTO[]>([])
 const mailConfigLoading = ref(false)
@@ -464,6 +565,7 @@ const MESSAGES_PAGE_SIZE = 20
 let messagesLoadVersion = 0
 let streamVersion = 0
 let mailConfigLoadVersion = 0
+let oauthServicesLoadVersion = 0
 let streamAbortController: AbortController | null = null
 const activeStreamMessageKeys = new Set<string>()
 watch(mobile, value => {
@@ -477,6 +579,17 @@ const formatTime = (value: string) => {
   const mm = String(date.getMinutes()).padStart(2, '0')
   if (date.toDateString() === now.toDateString()) return `${hh}:${mm}`
   return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${hh}:${mm}`
+}
+const formatOAuthExpiresAt = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
 }
 const scrollToBottom = () => {
   if (messagesAreaRef.value) messagesAreaRef.value.scrollTop = messagesAreaRef.value.scrollHeight
@@ -579,6 +692,78 @@ const loadMailConfig = async () => {
   } finally {
     if (loadVersion === mailConfigLoadVersion) mailConfigLoading.value = false
   }
+}
+
+const loadOAuthServices = async () => {
+  const loadVersion = ++oauthServicesLoadVersion
+  oauthServicesLoading.value = true
+  oauthServicesError.value = ''
+  oauthServices.value = []
+
+  try {
+    const services = await oauthApi.getServices()
+    if (loadVersion !== oauthServicesLoadVersion || !thirdPartyAuthDialogOpen.value) return
+    oauthServices.value = services
+  } catch (error) {
+    if (loadVersion !== oauthServicesLoadVersion) return
+    if (handleUnauthorized(error)) {
+      thirdPartyAuthDialogOpen.value = false
+      return
+    }
+    oauthServicesError.value = isApiError(error) ? error.message : '第三方服务列表加载失败，请稍后重试。'
+  } finally {
+    if (loadVersion === oauthServicesLoadVersion) oauthServicesLoading.value = false
+  }
+}
+
+const parseAuthorizationUrl = (value: string) => {
+  const url = new URL(value)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('服务返回了不受支持的授权地址。')
+  }
+  return url.toString()
+}
+
+const authorizeOAuthService = async (service: OAuthServiceDTO) => {
+  if (service.connected || oauthAuthorizingAppKey.value) return
+
+  const authorizationWindow = window.open('about:blank', '_blank')
+  if (!authorizationWindow) {
+    showError('授权页面被浏览器阻止，请允许本站打开新标签页后重试。')
+    return
+  }
+
+  try {
+    authorizationWindow.opener = null
+  } catch {
+    // Some browsers prevent changing opener; navigation can still continue safely.
+  }
+
+  oauthAuthorizingAppKey.value = service.appKey
+  try {
+    const result = await oauthApi.authorize(service.appKey)
+    const authorizationUrl = parseAuthorizationUrl(result.authorizationUrl)
+    if (authorizationWindow.closed) throw new Error('授权页面已关闭，请重新发起授权。')
+    authorizationWindow.location.replace(authorizationUrl)
+    oauthRefreshOnFocus.value = true
+  } catch (error) {
+    authorizationWindow.close()
+    if (handleUnauthorized(error)) {
+      thirdPartyAuthDialogOpen.value = false
+      return
+    }
+    showError(isApiError(error)
+      ? error.message
+      : error instanceof Error ? error.message : '授权请求失败，请稍后重试。')
+  } finally {
+    oauthAuthorizingAppKey.value = null
+  }
+}
+
+const refreshOAuthServicesOnFocus = () => {
+  if (!oauthRefreshOnFocus.value) return
+  oauthRefreshOnFocus.value = false
+  if (thirdPartyAuthDialogOpen.value) void loadOAuthServices()
 }
 
 const persistMailConfig = async (): Promise<boolean> => {
@@ -1017,6 +1202,21 @@ const openEmailConfigDialog = () => {
   void loadMailConfig()
 }
 
+const openThirdPartyAuthDialog = () => {
+  settingsMenuOpen.value = false
+  thirdPartyAuthDialogOpen.value = true
+  void loadOAuthServices()
+}
+
+const closeThirdPartyAuthDialog = () => {
+  if (oauthAuthorizingAppKey.value) return
+  oauthServicesLoadVersion += 1
+  thirdPartyAuthDialogOpen.value = false
+  oauthServicesLoading.value = false
+  oauthServicesError.value = ''
+  oauthServices.value = []
+}
+
 const closeEmailConfigDialog = () => {
   if (mailConfigBusy.value) return
   mailConfigLoadVersion += 1
@@ -1058,7 +1258,8 @@ const onMessageKeydown = (event: KeyboardEvent) => {
 
 const sendMessage = async () => {
   const content = inputMessage.value.trim()
-  if (!content || busy.value || !currentConversation.value) return
+  const conversation = currentConversation.value
+  if (!content || busy.value || !conversation) return
   sending.value = true
   messagesError.value = ''
   const nowIso = new Date().toISOString()
@@ -1069,14 +1270,15 @@ const sendMessage = async () => {
   await nextTick()
   scrollToBottom()
   try {
-    const threadId = currentConversation.value.thread_id
-    const run = await chatApi.sendMessage({ content, agentId: currentConversationId.value, threadId })
-    if (currentConversation.value?.thread_id !== threadId || run.thread_id !== threadId) {
+    const threadId = conversation.thread_id
+    const run = await chatApi.sendMessage({ content, agentId: conversation.name, threadId })
+    if (currentConversation.value !== conversation || (threadId && run.thread_id !== threadId)) {
       const idx = currentMessages.value.findIndex(message => message.key === replyKey)
       if (idx >= 0 && !currentMessages.value[idx]?.content) currentMessages.value.splice(idx, 1)
       sending.value = false
       return
     }
+    conversation.thread_id = run.thread_id
     const reply = currentMessages.value.find(message => message.key === replyKey)
     if (!reply) {
       sending.value = false
@@ -1084,7 +1286,7 @@ const sendMessage = async () => {
     }
     replyKey = `run:${run.run_id}:placeholder`
     reply.key = replyKey
-    void streamActiveRun(run.run_id, replyKey, threadId)
+    void streamActiveRun(run.run_id, replyKey, run.thread_id)
   } catch (error) {
     const idx = currentMessages.value.findIndex(message => message.key === replyKey)
     if (idx >= 0 && !currentMessages.value[idx]?.content) currentMessages.value.splice(idx, 1)
@@ -1095,10 +1297,14 @@ const sendMessage = async () => {
   }
 }
 onMounted(async () => {
+  window.addEventListener('focus', refreshOAuthServicesOnFocus)
   await loadConversations()
   await loadMessages()
 })
-onBeforeUnmount(stopActiveStream)
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshOAuthServicesOnFocus)
+  stopActiveStream()
+})
 </script>
 
 <style scoped>
@@ -1305,6 +1511,82 @@ onBeforeUnmount(stopActiveStream)
 
 .email-config-state .v-btn {
   margin-top: 6px;
+}
+
+.oauth-service-list {
+  display: grid;
+  gap: 12px;
+}
+
+.oauth-service-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 18px;
+  border: 1px solid var(--site-border);
+  border-radius: 8px;
+  background: var(--site-surface);
+}
+
+.oauth-service-main,
+.oauth-service-title {
+  min-width: 0;
+}
+
+.oauth-service-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.oauth-service-title {
+  flex: 1;
+}
+
+.oauth-service-title h3 {
+  font-size: 1rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.oauth-service-title span {
+  display: block;
+  margin-top: 3px;
+  color: var(--site-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.oauth-service-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 14px;
+}
+
+.oauth-service-meta > div {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.oauth-service-meta dt {
+  flex: 0 0 auto;
+  color: var(--site-muted);
+}
+
+.oauth-service-meta dd {
+  min-width: 0;
+  color: var(--site-text);
+  overflow-wrap: anywhere;
+}
+
+.oauth-service-action {
+  min-width: 108px;
 }
 
 .email-config-form {
@@ -1851,6 +2133,17 @@ onBeforeUnmount(stopActiveStream)
   }
   .email-config-intro h2 {
     font-size: 1.25rem;
+  }
+  .oauth-service-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px;
+  }
+  .oauth-service-heading {
+    align-items: flex-start;
+  }
+  .oauth-service-action {
+    width: 100%;
   }
   .email-config-actions .v-btn:last-child {
     flex: 1;
