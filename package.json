@@ -15,6 +15,7 @@
   "dependencies": {
     "@mdi/font": "7.4.47",
     "@nuxtjs/i18n": "^10.2.3",
+    "@vuetify/v0": "^1.2.1",
     "cropperjs": "^2.3.0",
     "isomorphic-dompurify": "^4.4.0",
     "markdown-it": "^15.0.2",

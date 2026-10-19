@@ -303,15 +303,15 @@
         </v-card-text>
       </v-card>
     </v-dialog>
-    <v-dialog v-model="thirdPartyAuthDialogOpen" :persistent="oauthAuthorizingAppKey !== null" fullscreen
+    <v-dialog v-model="thirdPartyAuthDialogOpen" :persistent="oauthActionPending" fullscreen
       transition="dialog-bottom-transition">
       <v-card class="email-config-page">
         <v-toolbar class="email-config-toolbar" color="surface" flat>
-          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="oauthAuthorizingAppKey !== null"
+          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="oauthActionPending"
             @click="closeThirdPartyAuthDialog" />
           <v-toolbar-title>第三方服务授权</v-toolbar-title>
           <v-btn icon="mdi-close" variant="text" aria-label="关闭第三方服务授权"
-            :disabled="oauthAuthorizingAppKey !== null" @click="closeThirdPartyAuthDialog" />
+            :disabled="oauthActionPending" @click="closeThirdPartyAuthDialog" />
         </v-toolbar>
         <v-divider />
         <v-card-text class="email-config-content">
@@ -377,18 +377,35 @@
                   </dl>
                 </div>
 
-                <v-btn class="oauth-service-action" :color="service.connected ? 'success' : 'primary'"
-                  :variant="service.connected ? 'tonal' : 'flat'" :prepend-icon="service.connected ? 'mdi-check' : 'mdi-open-in-new'"
-                  :loading="oauthAuthorizingAppKey === service.appKey"
-                  :disabled="service.connected || oauthAuthorizingAppKey !== null"
-                  :title="service.connected ? '该服务已完成授权' : '将在新标签页中打开授权页面'"
-                  @click="authorizeOAuthService(service)">
-                  {{ service.connected ? '已授权' : '授权' }}
+                <v-btn class="oauth-service-action" :color="service.connected ? 'error' : 'primary'"
+                  :variant="service.connected ? 'tonal' : 'flat'"
+                  :prepend-icon="service.connected ? 'mdi-link-off' : 'mdi-open-in-new'"
+                  :loading="oauthAuthorizingAppKey === service.appKey || oauthRevokingAppKey === service.appKey"
+                  :disabled="oauthActionPending"
+                  :title="service.connected ? '取消该服务的授权' : '将在新标签页中打开授权页面'"
+                  @click="service.connected ? openOAuthRevokeDialog(service) : authorizeOAuthService(service)">
+                  {{ service.connected ? '取消授权' : '授权' }}
                 </v-btn>
               </article>
             </div>
           </div>
         </v-card-text>
+      </v-card>
+    </v-dialog>
+    <v-dialog v-model="oauthRevokeDialogOpen" :persistent="oauthRevokingAppKey !== null" max-width="440">
+      <v-card>
+        <v-card-title>取消第三方服务授权</v-card-title>
+        <v-card-text>
+          确认取消“{{ oauthRevokeTarget?.displayName }}”的授权吗？取消后，对话将无法继续使用该服务的能力。
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" :disabled="oauthRevokingAppKey !== null" @click="closeOAuthRevokeDialog">保留授权</v-btn>
+          <v-btn color="error" :loading="oauthRevokingAppKey !== null" :disabled="oauthRevokingAppKey !== null"
+            @click="revokeOAuthAuthorization">
+            取消授权
+          </v-btn>
+        </v-card-actions>
       </v-card>
     </v-dialog>
     <v-snackbar v-model="snackbar.show" :timeout="snackbar.timeout" class="site-snackbar" location="bottom">
@@ -477,6 +494,9 @@ const oauthServices = ref<OAuthServiceDTO[]>([])
 const oauthServicesLoading = ref(false)
 const oauthServicesError = ref('')
 const oauthAuthorizingAppKey = ref<string | null>(null)
+const oauthRevokingAppKey = ref<string | null>(null)
+const oauthRevokeDialogOpen = ref(false)
+const oauthRevokeTarget = ref<OAuthServiceDTO | null>(null)
 const oauthRefreshOnFocus = ref(false)
 const mailConfig = ref<MailConfigDTO | null>(null)
 const mailEndpoints = ref<MailEndpointDTO[]>([])
@@ -559,6 +579,7 @@ const mailConfigUpdatedAt = computed(() => {
   }).format(date)
 })
 const busy = computed(() => authRequired.value || sending.value || creatingThread.value || loading.value || conversationsLoading.value)
+const oauthActionPending = computed(() => oauthAuthorizingAppKey.value !== null || oauthRevokingAppKey.value !== null)
 const conversationSelectionDisabled = computed(() => authRequired.value || creatingThread.value || loading.value || conversationsLoading.value)
 const historyLoaderLabel = computed(() => `加载更早的消息，当前已显示 ${currentMessages.value.length} 条，共 ${messagesTotal.value} 条`)
 const MESSAGES_PAGE_SIZE = 20
@@ -725,7 +746,7 @@ const parseAuthorizationUrl = (value: string) => {
 }
 
 const authorizeOAuthService = async (service: OAuthServiceDTO) => {
-  if (service.connected || oauthAuthorizingAppKey.value) return
+  if (service.connected || oauthActionPending.value) return
 
   const authorizationWindow = window.open('about:blank', '_blank')
   if (!authorizationWindow) {
@@ -757,6 +778,44 @@ const authorizeOAuthService = async (service: OAuthServiceDTO) => {
       : error instanceof Error ? error.message : '授权请求失败，请稍后重试。')
   } finally {
     oauthAuthorizingAppKey.value = null
+  }
+}
+
+const openOAuthRevokeDialog = (service: OAuthServiceDTO) => {
+  if (!service.connected || oauthActionPending.value) return
+  oauthRevokeTarget.value = service
+  oauthRevokeDialogOpen.value = true
+}
+
+const closeOAuthRevokeDialog = () => {
+  if (oauthRevokingAppKey.value) return
+  oauthRevokeDialogOpen.value = false
+  oauthRevokeTarget.value = null
+}
+
+const revokeOAuthAuthorization = async () => {
+  const service = oauthRevokeTarget.value
+  if (!service?.connected || oauthActionPending.value) return
+
+  oauthRevokingAppKey.value = service.appKey
+  try {
+    await oauthApi.revokeAuthorization(service.appKey)
+    service.connected = false
+    service.status = null
+    service.scope = null
+    service.expiresAt = null
+    oauthRevokeDialogOpen.value = false
+    oauthRevokeTarget.value = null
+  } catch (error) {
+    if (handleUnauthorized(error)) {
+      oauthRevokeDialogOpen.value = false
+      oauthRevokeTarget.value = null
+      thirdPartyAuthDialogOpen.value = false
+      return
+    }
+    showError(isApiError(error) ? error.message : '取消授权失败，请稍后重试。')
+  } finally {
+    oauthRevokingAppKey.value = null
   }
 }
 
@@ -1209,8 +1268,10 @@ const openThirdPartyAuthDialog = () => {
 }
 
 const closeThirdPartyAuthDialog = () => {
-  if (oauthAuthorizingAppKey.value) return
+  if (oauthActionPending.value) return
   oauthServicesLoadVersion += 1
+  oauthRevokeDialogOpen.value = false
+  oauthRevokeTarget.value = null
   thirdPartyAuthDialogOpen.value = false
   oauthServicesLoading.value = false
   oauthServicesError.value = ''

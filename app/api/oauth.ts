@@ -25,11 +25,25 @@ export const useOAuthApi = () => {
       return unwrap(resp)
     },
 
+    async getService(appKey: string): Promise<OAuthServiceDTO> {
+      const resp = await $api<OAuthServiceDTO | Envelope<OAuthServiceDTO>>(`/oauth/${encodeURIComponent(appKey)}`, {
+        method: 'GET',
+      })
+      return unwrap(resp)
+    },
+
     async authorize(appKey: string): Promise<OAuthAuthorizeDTO> {
       const resp = await $api<OAuthAuthorizeDTO | Envelope<OAuthAuthorizeDTO>>(`/oauth/${encodeURIComponent(appKey)}/authorize`, {
         method: 'POST',
       })
       return unwrap(resp)
+    },
+
+    async revokeAuthorization(appKey: string): Promise<void> {
+      const resp = await $api<unknown | Envelope<unknown>>(`/oauth/${encodeURIComponent(appKey)}/authorization`, {
+        method: 'DELETE',
+      })
+      unwrap(resp)
     },
   }
 
