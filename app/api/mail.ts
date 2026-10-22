@@ -1,6 +1,8 @@
 import { useHttp, unwrap, type Envelope } from './http'
 
-export interface MailConfigDTO {
+export interface ImapConfigDTO {
+  id: number
+  displayName: string | null
   host: string
   port: number
   secure: boolean
@@ -16,7 +18,17 @@ export interface MailEndpointDTO {
   secure: boolean
 }
 
-export interface UpdateMailConfigReq {
+export interface CreateImapConfigReq {
+  displayName?: string
+  host: string
+  port: number
+  secure: boolean
+  username: string
+  password: string
+}
+
+export interface UpdateImapConfigReq {
+  displayName?: string
   host: string
   port: number
   secure: boolean
@@ -39,23 +51,31 @@ export const useMailApi = () => {
       return unwrap(resp)
     },
 
-    async getConfig(): Promise<MailConfigDTO | null> {
-      const resp = await $api<MailConfigDTO | null | Envelope<MailConfigDTO | null>>('/mail/config', {
+    async getImapConfigs(): Promise<ImapConfigDTO[]> {
+      const resp = await $api<ImapConfigDTO[] | Envelope<ImapConfigDTO[]>>('/mail/imap-configs', {
         method: 'GET',
       })
       return unwrap(resp)
     },
 
-    async updateConfig(req: UpdateMailConfigReq): Promise<void> {
-      const resp = await $api<unknown | Envelope<unknown>>('/mail/config', {
+    async createImapConfig(req: CreateImapConfigReq): Promise<ImapConfigDTO> {
+      const resp = await $api<ImapConfigDTO | Envelope<ImapConfigDTO>>('/mail/imap-configs', {
+        method: 'POST',
+        body: req,
+      })
+      return unwrap(resp)
+    },
+
+    async updateImapConfig(id: number, req: UpdateImapConfigReq): Promise<void> {
+      const resp = await $api<unknown | Envelope<unknown>>(`/mail/imap-configs/${encodeURIComponent(id)}`, {
         method: 'PUT',
         body: req,
       })
       unwrap(resp)
     },
 
-    async testConnection(): Promise<MailTestResultDTO> {
-      const resp = await $api<MailTestResultDTO | Envelope<MailTestResultDTO>>('/mail/test', {
+    async testImapConfig(id: number): Promise<MailTestResultDTO> {
+      const resp = await $api<MailTestResultDTO | Envelope<MailTestResultDTO>>(`/mail/imap-configs/${encodeURIComponent(id)}/test`, {
         method: 'POST',
       })
       return unwrap(resp)

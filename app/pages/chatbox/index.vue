@@ -187,7 +187,7 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-    <v-dialog v-model="emailConfigDialogOpen" :persistent="mailConfigBusy" fullscreen transition="dialog-bottom-transition">
+    <v-dialog v-model="emailConfigDialogOpen" persistent fullscreen transition="dialog-bottom-transition">
       <v-card class="email-config-page">
         <v-toolbar class="email-config-toolbar" color="surface" flat>
           <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="mailConfigBusy"
@@ -198,7 +198,7 @@
         </v-toolbar>
         <v-divider />
         <v-card-text class="email-config-content">
-          <div class="email-config-shell">
+          <div class="email-config-shell email-config-shell-wide">
             <header class="email-config-intro">
               <span class="email-config-icon" aria-hidden="true">
                 <v-icon icon="mdi-email-sync-outline" color="secondary" size="38" />
@@ -224,83 +224,144 @@
               </v-btn>
             </div>
 
-            <v-form v-else class="email-config-form" @submit.prevent="saveMailConfig">
-              <div class="email-config-status" aria-live="polite">
-                <v-icon :icon="mailConfig ? 'mdi-check-circle-outline' : 'mdi-information-outline'"
-                  :color="mailConfig ? 'success' : 'secondary'" size="24" />
-                <div>
-                  <strong>{{ mailConfig ? '邮箱连接已配置' : '尚未配置邮箱连接' }}</strong>
-                  <span v-if="mailConfig">最近更新：{{ mailConfigUpdatedAt }}</span>
-                  <span v-else>填写连接信息并保存后即可启用。</span>
+            <div v-else class="email-config-workspace" :class="{ 'email-config-workspace-mobile': mobile }">
+              <aside v-show="!mobile || !mailMobileEditorOpen" class="email-account-panel">
+                <div class="email-account-panel-header">
+                  <div>
+                    <strong>邮箱账号</strong>
+                    <span>{{ mailConfigs.length }} 个配置</span>
+                  </div>
+                  <v-btn color="primary" prepend-icon="mdi-plus" size="small" :disabled="mailConfigBusy"
+                    @click="requestCreateMailConfig">
+                    新增邮箱
+                  </v-btn>
                 </div>
-              </div>
 
-              <v-alert v-if="mailConfigSuccess" type="success" variant="tonal" density="comfortable">
-                {{ mailConfigSuccess }}
-              </v-alert>
-              <v-alert v-if="mailConfigSaveError" type="error" variant="tonal" density="comfortable" role="alert">
-                {{ mailConfigSaveError }}
-              </v-alert>
+                <v-list v-if="mailConfigs.length" class="email-account-list" lines="three" nav>
+                  <v-list-item v-for="config in mailConfigs" :key="config.id"
+                    :active="mailEditorMode === 'edit' && selectedMailConfigId === config.id"
+                    active-color="secondary" prepend-icon="mdi-email-outline"
+                    :title="mailConfigLabel(config)" :subtitle="`${config.username}\n${formatMailConfigEndpoint(config)}`"
+                    :disabled="mailConfigBusy" @click="requestSelectMailConfig(config.id)">
+                    <template #append>
+                      <v-icon icon="mdi-chevron-right" size="20" />
+                    </template>
+                  </v-list-item>
+                </v-list>
 
-              <v-select v-model="mailForm.endpointKey" :items="mailEndpointOptions" item-title="title" item-value="key"
-                class="email-endpoint-select" label="邮箱服务器" placeholder="请选择邮箱服务器"
-                prepend-inner-icon="mdi-server-outline" variant="outlined" color="secondary"
-                no-data-text="暂无可用邮箱服务器" :disabled="mailConfigBusy || !mailEndpoints.length"
-                :error-messages="mailFieldMessages('endpoint')" @blur="mailTouched.endpoint = true">
-                <template #selection>
-                  <span v-if="selectedMailEndpointHost" class="email-endpoint-selection">
-                    <span class="email-endpoint-host">{{ selectedMailEndpointHost }}</span>
-                    <span class="email-endpoint-meta">{{ selectedMailEndpointMeta }}</span>
-                  </span>
-                </template>
-                <template #item="{ props, item }">
-                  <v-list-item v-bind="props" class="email-endpoint-option" :title="item.title"
-                    :subtitle="item.subtitle" />
-                </template>
-              </v-select>
+                <div v-else class="email-account-empty">
+                  <v-icon icon="mdi-email-plus-outline" color="secondary" size="38" />
+                  <strong>还没有邮箱配置</strong>
+                  <span>新增一个 IMAP 邮箱，让智能体读取并总结邮件。</span>
+                </div>
+              </aside>
 
-              <v-alert v-if="!mailEndpoints.length" type="warning" variant="tonal" density="comfortable">
-                暂无可用邮箱服务器，请稍后重试。
-              </v-alert>
+              <section v-show="!mobile || mailMobileEditorOpen" class="email-editor-panel">
+                <v-form v-if="mailEditorMode !== 'none'" class="email-config-form" @submit.prevent="saveMailConfig">
+                  <v-btn v-if="mobile" class="email-mobile-back" variant="text" prepend-icon="mdi-arrow-left"
+                    :disabled="mailConfigBusy" @click="requestMailListView">
+                    返回邮箱列表
+                  </v-btn>
 
-              <v-text-field v-model="mailForm.username" label="邮箱用户名" placeholder="name@example.com"
-                prepend-inner-icon="mdi-account-outline" autocomplete="username" :disabled="mailConfigBusy"
-                :error-messages="mailFieldMessages('username')" @blur="mailTouched.username = true" />
+                  <div class="email-config-status" aria-live="polite">
+                    <v-icon :icon="activeMailConfig ? 'mdi-check-circle-outline' : 'mdi-email-plus-outline'"
+                      :color="activeMailConfig ? 'success' : 'secondary'" size="24" />
+                    <div>
+                      <strong>{{ activeMailConfig ? mailConfigLabel(activeMailConfig) : '新增邮箱连接' }}</strong>
+                      <span v-if="activeMailConfig">最近更新：{{ mailConfigUpdatedAt }}</span>
+                      <span v-else>填写连接信息并保存后即可启用。</span>
+                    </div>
+                  </div>
 
-              <v-text-field v-model="mailForm.password"
-                :label="mailConfig?.hasPassword ? '新密码（可选）' : '邮箱密码'"
-                :placeholder="mailConfig?.hasPassword ? '留空则保留当前密码' : '请输入邮箱密码'"
-                :type="mailPasswordVisible ? 'text' : 'password'" prepend-inner-icon="mdi-lock-outline"
-                autocomplete="new-password" :disabled="mailConfigBusy" :error-messages="mailFieldMessages('password')"
-                @blur="mailTouched.password = true">
-                <template #append-inner>
-                  <v-btn :icon="mailPasswordVisible ? 'mdi-eye-off-outline' : 'mdi-eye-outline'" variant="text"
-                    width="44" height="44" :aria-label="mailPasswordVisible ? '隐藏邮箱密码' : '显示邮箱密码'"
-                    :aria-pressed="mailPasswordVisible" :disabled="mailConfigBusy"
-                    @click="mailPasswordVisible = !mailPasswordVisible" />
-                </template>
-              </v-text-field>
+                  <v-alert v-if="mailConfigSuccess" type="success" variant="tonal" density="comfortable">
+                    {{ mailConfigSuccess }}
+                  </v-alert>
+                  <v-alert v-if="mailConfigSaveError" type="error" variant="tonal" density="comfortable" role="alert">
+                    {{ mailConfigSaveError }}
+                  </v-alert>
 
-              <p v-if="mailConfig?.hasPassword" class="email-password-note">
-                <v-icon icon="mdi-shield-check-outline" size="18" color="success" />
-                已保存邮箱密码；仅在需要更换密码时填写此项。
-              </p>
+                  <v-text-field v-model="mailForm.displayName" label="显示名称（可选）" placeholder="例如：工作邮箱"
+                    prepend-inner-icon="mdi-card-account-mail-outline" :disabled="mailConfigBusy"
+                    :error-messages="mailFieldMessages('displayName')" @blur="mailTouched.displayName = true" />
 
-              <div class="email-config-actions">
-                <v-btn v-if="mailConfig" class="email-config-test-button" color="secondary" variant="tonal"
-                  prepend-icon="mdi-connection" :loading="mailConnectionTesting" :disabled="mailConfigBusy"
-                  @click="testMailConnection">
-                  测试连接
-                </v-btn>
-                <v-btn variant="text" :disabled="mailConfigBusy" @click="closeEmailConfigDialog">取消</v-btn>
-                <v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline"
-                  :loading="mailConfigSaving" :disabled="!canSaveMailConfig">
-                  保存配置
-                </v-btn>
-              </div>
-            </v-form>
+                  <v-select v-model="mailForm.endpointKey" :items="mailEndpointOptions" item-title="title" item-value="key"
+                    class="email-endpoint-select" label="邮箱服务器" placeholder="请选择邮箱服务器"
+                    prepend-inner-icon="mdi-server-outline" variant="outlined" color="secondary"
+                    no-data-text="暂无可用邮箱服务器" :disabled="mailConfigBusy || !mailEndpoints.length"
+                    :error-messages="mailFieldMessages('endpoint')" @blur="mailTouched.endpoint = true">
+                    <template #selection>
+                      <span v-if="selectedMailEndpointHost" class="email-endpoint-selection">
+                        <span class="email-endpoint-host">{{ selectedMailEndpointHost }}</span>
+                        <span class="email-endpoint-meta">{{ selectedMailEndpointMeta }}</span>
+                      </span>
+                    </template>
+                    <template #item="{ props, item }">
+                      <v-list-item v-bind="props" class="email-endpoint-option" :title="item.title"
+                        :subtitle="item.subtitle" />
+                    </template>
+                  </v-select>
+
+                  <v-alert v-if="!mailEndpoints.length" type="warning" variant="tonal" density="comfortable">
+                    暂无可用邮箱服务器，请稍后重试。
+                  </v-alert>
+
+                  <v-text-field v-model="mailForm.username" label="邮箱用户名" placeholder="name@example.com"
+                    prepend-inner-icon="mdi-account-outline" autocomplete="username" :disabled="mailConfigBusy"
+                    :error-messages="mailFieldMessages('username')" @blur="mailTouched.username = true" />
+
+                  <v-text-field v-model="mailForm.password"
+                    :label="activeMailConfig?.hasPassword ? '新密码（可选）' : '邮箱密码'"
+                    :placeholder="activeMailConfig?.hasPassword ? '留空则保留当前密码' : '请输入邮箱密码'"
+                    :type="mailPasswordVisible ? 'text' : 'password'" prepend-inner-icon="mdi-lock-outline"
+                    autocomplete="new-password" :disabled="mailConfigBusy" :error-messages="mailFieldMessages('password')"
+                    @blur="mailTouched.password = true">
+                    <template #append-inner>
+                      <v-btn :icon="mailPasswordVisible ? 'mdi-eye-off-outline' : 'mdi-eye-outline'" variant="text"
+                        width="44" height="44" :aria-label="mailPasswordVisible ? '隐藏邮箱密码' : '显示邮箱密码'"
+                        :aria-pressed="mailPasswordVisible" :disabled="mailConfigBusy"
+                        @click="mailPasswordVisible = !mailPasswordVisible" />
+                    </template>
+                  </v-text-field>
+
+                  <p v-if="activeMailConfig?.hasPassword" class="email-password-note">
+                    <v-icon icon="mdi-shield-check-outline" size="18" color="success" />
+                    已保存邮箱密码；仅在需要更换密码时填写此项。
+                  </p>
+
+                  <div class="email-config-actions">
+                    <v-btn v-if="activeMailConfig" class="email-config-test-button" color="secondary" variant="tonal"
+                      prepend-icon="mdi-connection" :loading="mailConnectionTesting" :disabled="mailConfigBusy"
+                      @click="testMailConnection">
+                      测试连接
+                    </v-btn>
+                    <v-btn variant="text" :disabled="mailConfigBusy" @click="cancelMailEditing">取消</v-btn>
+                    <v-btn type="submit" color="primary" prepend-icon="mdi-content-save-outline"
+                      :loading="mailConfigSaving" :disabled="!canSaveMailConfig">
+                      {{ activeMailConfig ? '保存配置' : '创建配置' }}
+                    </v-btn>
+                  </div>
+                </v-form>
+
+                <div v-else class="email-editor-placeholder">
+                  <v-icon icon="mdi-email-edit-outline" color="secondary" size="46" />
+                  <h3>选择一个邮箱配置</h3>
+                  <p>从左侧选择已有账号进行编辑，或新增一个邮箱连接。</p>
+                </div>
+              </section>
+            </div>
           </div>
         </v-card-text>
+      </v-card>
+    </v-dialog>
+    <v-dialog v-model="mailDiscardDialogOpen" persistent max-width="440">
+      <v-card>
+        <v-card-title>放弃未保存的修改？</v-card-title>
+        <v-card-text>当前邮箱配置有尚未保存的修改。继续后，这些修改将会丢失。</v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" :disabled="mailConfigBusy" @click="cancelMailDiscard">继续编辑</v-btn>
+          <v-btn color="error" variant="tonal" :disabled="mailConfigBusy" @click="confirmMailDiscard">放弃修改</v-btn>
+        </v-card-actions>
       </v-card>
     </v-dialog>
     <v-dialog v-model="thirdPartyAuthDialogOpen" :persistent="oauthActionPending" fullscreen
@@ -416,7 +477,7 @@
 </template>
 
 <script setup lang="ts">
-import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type MailConfigDTO, type MailEndpointDTO, type MessageDTO, type OAuthServiceDTO, type UpdateMailConfigReq } from '@/api'
+import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type MailEndpointDTO, type MessageDTO, type OAuthServiceDTO, type UpdateImapConfigReq } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useDisplay } from 'vuetify'
 import DOMPurify from 'isomorphic-dompurify'
@@ -430,8 +491,10 @@ const appStore = useAppStore()
 const { mobile } = useDisplay()
 const { assetUrl } = useAssetUrl()
 type ToolCallStatus = 'running' | 'success' | 'error'
-type MailField = 'endpoint' | 'username' | 'password'
+type MailField = 'displayName' | 'endpoint' | 'username' | 'password'
+type MailEditorMode = 'none' | 'create' | 'edit'
 interface MailConfigForm {
+  displayName: string
   endpointKey: string
   username: string
   password: string
@@ -498,7 +561,11 @@ const oauthRevokingAppKey = ref<string | null>(null)
 const oauthRevokeDialogOpen = ref(false)
 const oauthRevokeTarget = ref<OAuthServiceDTO | null>(null)
 const oauthRefreshOnFocus = ref(false)
-const mailConfig = ref<MailConfigDTO | null>(null)
+const mailConfigs = ref<ImapConfigDTO[]>([])
+const selectedMailConfigId = ref<number | null>(null)
+const mailEditorMode = ref<MailEditorMode>('none')
+const mailMobileEditorOpen = ref(false)
+const mailDiscardDialogOpen = ref(false)
 const mailEndpoints = ref<MailEndpointDTO[]>([])
 const mailConfigLoading = ref(false)
 const mailConfigSaving = ref(false)
@@ -508,11 +575,13 @@ const mailConfigSaveError = ref('')
 const mailConfigSuccess = ref('')
 const mailPasswordVisible = ref(false)
 const mailForm = reactive<MailConfigForm>({
+  displayName: '',
   endpointKey: '',
   username: '',
   password: '',
 })
 const mailTouched = reactive<Record<MailField, boolean>>({
+  displayName: false,
   endpoint: false,
   username: false,
   password: false,
@@ -536,6 +605,9 @@ const mailEndpointOptions = computed<MailEndpointOption[]>(() => mailEndpoints.v
   subtitle: `${endpoint.port} · ${endpoint.secure ? 'TLS' : '非 TLS'}`,
   endpoint,
 })))
+const defaultNewMailEndpointKey = computed(() => {
+  return mailEndpointOptions.value.length === 1 ? (mailEndpointOptions.value[0]?.key ?? '') : ''
+})
 const selectedMailEndpoint = computed(() => {
   return mailEndpointOptions.value.find(option => option.key === mailForm.endpointKey)?.endpoint ?? null
 })
@@ -544,20 +616,41 @@ const selectedMailEndpointMeta = computed(() => {
   const endpoint = selectedMailEndpoint.value
   return endpoint ? `${endpoint.port} · ${endpoint.secure ? 'TLS' : '非 TLS'}` : ''
 })
+const activeMailConfig = computed(() => {
+  if (mailEditorMode.value !== 'edit' || selectedMailConfigId.value === null) return null
+  return mailConfigs.value.find(config => config.id === selectedMailConfigId.value) ?? null
+})
+const normalizedMailDisplayName = computed(() => mailForm.displayName.trim())
 const normalizedMailUsername = computed(() => mailForm.username.trim())
+const unicodeLength = (value: string) => Array.from(value).length
+const mailPasswordBytes = computed(() => new TextEncoder().encode(mailForm.password).byteLength)
 const mailValidationErrors = computed<Record<MailField, string | null>>(() => ({
+  displayName: unicodeLength(normalizedMailDisplayName.value) > 128 ? '显示名称不能超过 128 个字符。' : null,
   endpoint: selectedMailEndpoint.value ? null : '请选择邮箱服务器。',
-  username: normalizedMailUsername.value ? null : '请输入邮箱用户名。',
-  password: !mailConfig.value?.hasPassword && mailForm.password.length === 0 ? '首次配置必须填写邮箱密码。' : null,
+  username: !normalizedMailUsername.value
+    ? '请输入邮箱用户名。'
+    : unicodeLength(normalizedMailUsername.value) > 320 ? '邮箱用户名不能超过 320 个字符。' : null,
+  password: mailEditorMode.value === 'create' && mailForm.password.length === 0
+    ? '创建配置时必须填写邮箱密码。'
+    : mailPasswordBytes.value > 4096 ? '邮箱密码不能超过 4096 个 UTF-8 字节。' : null,
 }))
 const mailFormDirty = computed(() => {
-  if (!mailConfig.value) return true
+  if (mailEditorMode.value === 'none') return false
+  if (mailEditorMode.value === 'create') {
+    return Boolean(normalizedMailDisplayName.value
+      || mailForm.endpointKey !== defaultNewMailEndpointKey.value
+      || normalizedMailUsername.value
+      || mailForm.password)
+  }
+  const config = activeMailConfig.value
+  if (!config) return false
   const endpoint = selectedMailEndpoint.value
   return !endpoint
-    || endpoint.host !== mailConfig.value.host
-    || endpoint.port !== mailConfig.value.port
-    || endpoint.secure !== mailConfig.value.secure
-    || normalizedMailUsername.value !== mailConfig.value.username
+    || normalizedMailDisplayName.value !== (config.displayName?.trim() ?? '')
+    || endpoint.host !== config.host
+    || endpoint.port !== config.port
+    || endpoint.secure !== config.secure
+    || normalizedMailUsername.value !== config.username
     || mailForm.password.length > 0
 })
 const mailConfigBusy = computed(() => mailConfigSaving.value || mailConnectionTesting.value)
@@ -567,9 +660,9 @@ const canSaveMailConfig = computed(() => !mailConfigLoading.value
   && mailFormDirty.value
   && mailFormValid.value)
 const mailConfigUpdatedAt = computed(() => {
-  if (!mailConfig.value?.updatedAt) return '未知时间'
-  const date = new Date(mailConfig.value.updatedAt)
-  if (Number.isNaN(date.getTime())) return mailConfig.value.updatedAt
+  if (!activeMailConfig.value?.updatedAt) return '未知时间'
+  const date = new Date(activeMailConfig.value.updatedAt)
+  if (Number.isNaN(date.getTime())) return activeMailConfig.value.updatedAt
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -587,6 +680,7 @@ let messagesLoadVersion = 0
 let streamVersion = 0
 let mailConfigLoadVersion = 0
 let oauthServicesLoadVersion = 0
+let pendingMailAction: (() => void) | null = null
 let streamAbortController: AbortController | null = null
 const activeStreamMessageKeys = new Set<string>()
 watch(mobile, value => {
@@ -660,18 +754,48 @@ const handleUnauthorized = (error: unknown) => {
 }
 
 const resetMailTouched = () => {
+  mailTouched.displayName = false
   mailTouched.endpoint = false
   mailTouched.username = false
   mailTouched.password = false
 }
 
-const applyMailConfig = (config: MailConfigDTO | null) => {
-  mailConfig.value = config
-  const configKey = config ? mailEndpointKey(config) : ''
+const mailConfigLabel = (config: ImapConfigDTO) => config.displayName?.trim() || config.username
+
+const formatMailConfigEndpoint = (config: Pick<ImapConfigDTO, 'host' | 'port' | 'secure'>) => {
+  return `${config.host}:${config.port} · ${config.secure ? 'TLS' : '非 TLS'}`
+}
+
+const applyMailConfig = (config: ImapConfigDTO) => {
+  selectedMailConfigId.value = config.id
+  mailEditorMode.value = 'edit'
+  const configKey = mailEndpointKey(config)
   const matchesConfig = mailEndpointOptions.value.some(option => option.key === configKey)
-  const onlyEndpoint = !config && mailEndpointOptions.value.length === 1 ? mailEndpointOptions.value[0] : undefined
-  mailForm.endpointKey = matchesConfig ? configKey : (onlyEndpoint?.key ?? '')
-  mailForm.username = config?.username ?? ''
+  mailForm.displayName = config.displayName ?? ''
+  mailForm.endpointKey = matchesConfig ? configKey : ''
+  mailForm.username = config.username
+  mailForm.password = ''
+  mailPasswordVisible.value = false
+  resetMailTouched()
+}
+
+const applyNewMailConfig = () => {
+  mailEditorMode.value = 'create'
+  mailForm.displayName = ''
+  mailForm.endpointKey = defaultNewMailEndpointKey.value
+  mailForm.username = ''
+  mailForm.password = ''
+  mailPasswordVisible.value = false
+  resetMailTouched()
+}
+
+const resetMailEditor = () => {
+  mailEditorMode.value = 'none'
+  selectedMailConfigId.value = null
+  mailMobileEditorOpen.value = false
+  mailForm.displayName = ''
+  mailForm.endpointKey = ''
+  mailForm.username = ''
   mailForm.password = ''
   mailPasswordVisible.value = false
   resetMailTouched()
@@ -683,9 +807,97 @@ const mailFieldMessages = (field: MailField) => {
 }
 
 const touchAllMailFields = () => {
+  mailTouched.displayName = true
   mailTouched.endpoint = true
   mailTouched.username = true
   mailTouched.password = true
+}
+
+const runAfterMailDiscard = (action: () => void) => {
+  if (!mailFormDirty.value) {
+    action()
+    return
+  }
+  pendingMailAction = action
+  mailDiscardDialogOpen.value = true
+}
+
+const cancelMailDiscard = () => {
+  mailDiscardDialogOpen.value = false
+  pendingMailAction = null
+}
+
+const confirmMailDiscard = () => {
+  const action = pendingMailAction
+  mailDiscardDialogOpen.value = false
+  pendingMailAction = null
+  action?.()
+}
+
+const requestSelectMailConfig = (id: number) => {
+  if (mailEditorMode.value === 'edit' && selectedMailConfigId.value === id) {
+    mailMobileEditorOpen.value = true
+    return
+  }
+  runAfterMailDiscard(() => {
+    const config = mailConfigs.value.find(item => item.id === id)
+    if (!config) return
+    applyMailConfig(config)
+    mailMobileEditorOpen.value = true
+    mailConfigSaveError.value = ''
+    mailConfigSuccess.value = ''
+  })
+}
+
+const requestCreateMailConfig = () => {
+  if (mailEditorMode.value === 'create') {
+    mailMobileEditorOpen.value = true
+    return
+  }
+  runAfterMailDiscard(() => {
+    applyNewMailConfig()
+    mailMobileEditorOpen.value = true
+    mailConfigSaveError.value = ''
+    mailConfigSuccess.value = ''
+  })
+}
+
+const showMailList = () => {
+  const config = activeMailConfig.value
+  if (config) applyMailConfig(config)
+  else if (selectedMailConfigId.value !== null) {
+    const previousConfig = mailConfigs.value.find(item => item.id === selectedMailConfigId.value)
+    if (previousConfig) applyMailConfig(previousConfig)
+    else resetMailEditor()
+  } else {
+    resetMailEditor()
+  }
+  mailMobileEditorOpen.value = false
+  mailConfigSaveError.value = ''
+  mailConfigSuccess.value = ''
+}
+
+const requestMailListView = () => runAfterMailDiscard(showMailList)
+
+const cancelMailEditing = () => {
+  if (mobile.value) {
+    requestMailListView()
+    return
+  }
+  const config = activeMailConfig.value
+  if (config) {
+    applyMailConfig(config)
+    mailConfigSaveError.value = ''
+    mailConfigSuccess.value = ''
+    return
+  }
+  const previousConfig = selectedMailConfigId.value === null
+    ? undefined
+    : mailConfigs.value.find(item => item.id === selectedMailConfigId.value)
+  if (previousConfig) applyMailConfig(previousConfig)
+  else resetMailEditor()
+  mailConfigSaveError.value = ''
+  mailConfigSuccess.value = ''
 }
 
 const loadMailConfig = async () => {
@@ -696,17 +908,20 @@ const loadMailConfig = async () => {
   mailConfigSuccess.value = ''
 
   try {
-    const [config, endpoints] = await Promise.all([
-      mailApi.getConfig(),
+    const [configs, endpoints] = await Promise.all([
+      mailApi.getImapConfigs(),
       mailApi.getEndpoints(),
     ])
     if (loadVersion !== mailConfigLoadVersion || !emailConfigDialogOpen.value) return
     mailEndpoints.value = endpoints
-    applyMailConfig(config)
+    mailConfigs.value = configs
+    if (configs[0]) applyMailConfig(configs[0])
+    else resetMailEditor()
+    mailMobileEditorOpen.value = false
   } catch (error) {
     if (loadVersion !== mailConfigLoadVersion) return
     if (handleUnauthorized(error)) {
-      emailConfigDialogOpen.value = false
+      performCloseEmailConfigDialog()
       return
     }
     mailConfigLoadError.value = isApiError(error) ? error.message : '邮箱配置或服务器列表加载失败，请稍后重试。'
@@ -825,38 +1040,61 @@ const refreshOAuthServicesOnFocus = () => {
   if (thirdPartyAuthDialogOpen.value) void loadOAuthServices()
 }
 
-const persistMailConfig = async (): Promise<boolean> => {
+const persistMailConfig = async (): Promise<number | null> => {
   if (!mailFormValid.value) {
     touchAllMailFields()
-    return false
+    return null
   }
   const endpoint = selectedMailEndpoint.value
   if (!endpoint) {
     mailTouched.endpoint = true
-    return false
+    return null
   }
 
-  const req: UpdateMailConfigReq = {
+  const baseReq = {
     host: endpoint.host,
     port: endpoint.port,
     secure: endpoint.secure,
     username: normalizedMailUsername.value,
   }
-  if (mailForm.password.length > 0) req.password = mailForm.password
+  const displayName = normalizedMailDisplayName.value || undefined
 
   try {
-    await mailApi.updateConfig(req)
-    const config = await mailApi.getConfig()
+    let configId: number
+    if (mailEditorMode.value === 'create') {
+      const req: CreateImapConfigReq = {
+        ...baseReq,
+        ...(displayName ? { displayName } : {}),
+        password: mailForm.password,
+      }
+      const createdConfig = await mailApi.createImapConfig(req)
+      configId = createdConfig.id
+    } else {
+      const config = activeMailConfig.value
+      if (!config) throw new Error('未找到要更新的邮箱配置。')
+      const req: UpdateImapConfigReq = {
+        ...baseReq,
+        ...(displayName ? { displayName } : {}),
+      }
+      if (mailForm.password.length > 0) req.password = mailForm.password
+      await mailApi.updateImapConfig(config.id, req)
+      configId = config.id
+    }
+
+    const configs = await mailApi.getImapConfigs()
+    mailConfigs.value = configs
+    const config = configs.find(item => item.id === configId)
     if (!config) throw new Error('保存后未读取到邮箱配置。')
     applyMailConfig(config)
-    return true
+    mailMobileEditorOpen.value = true
+    return configId
   } catch (error) {
     if (handleUnauthorized(error)) {
-      emailConfigDialogOpen.value = false
-      return false
+      performCloseEmailConfigDialog()
+      return null
     }
     mailConfigSaveError.value = isApiError(error) ? error.message : '邮箱配置保存失败，请稍后重试。'
-    return false
+    return null
   }
 }
 
@@ -872,14 +1110,18 @@ const saveMailConfig = async () => {
   mailConfigSuccess.value = ''
 
   try {
-    if (await persistMailConfig()) mailConfigSuccess.value = '邮箱连接配置已保存。'
+    const wasCreating = mailEditorMode.value === 'create'
+    if (await persistMailConfig()) {
+      mailConfigSuccess.value = wasCreating ? '邮箱连接配置已创建。' : '邮箱连接配置已保存。'
+    }
   } finally {
     mailConfigSaving.value = false
   }
 }
 
 const testMailConnection = async () => {
-  if (!mailConfig.value || mailConfigBusy.value || mailConfigLoading.value) return
+  const config = activeMailConfig.value
+  if (!config || mailConfigBusy.value || mailConfigLoading.value) return
   if (mailFormDirty.value && !mailFormValid.value) {
     touchAllMailFields()
     return
@@ -889,19 +1131,22 @@ const testMailConnection = async () => {
   mailConfigSaveError.value = ''
   mailConfigSuccess.value = ''
   let configSaved = false
+  let configId = config.id
 
   try {
     if (mailFormDirty.value) {
       mailConfigSaving.value = true
       try {
-        configSaved = await persistMailConfig()
+        const savedConfigId = await persistMailConfig()
+        configSaved = savedConfigId !== null
+        if (savedConfigId !== null) configId = savedConfigId
       } finally {
         mailConfigSaving.value = false
       }
       if (!configSaved) return
     }
 
-    const result = await mailApi.testConnection()
+    const result = await mailApi.testImapConfig(configId)
     if (result.connected) {
       mailConfigSuccess.value = '邮箱连接测试成功。'
     } else {
@@ -909,7 +1154,7 @@ const testMailConnection = async () => {
     }
   } catch (error) {
     if (handleUnauthorized(error)) {
-      emailConfigDialogOpen.value = false
+      performCloseEmailConfigDialog()
       return
     }
     const message = isApiError(error) ? error.message : '邮箱连接测试失败，请稍后重试。'
@@ -1258,6 +1503,7 @@ const openClearContextDialog = () => {
 const openEmailConfigDialog = () => {
   settingsMenuOpen.value = false
   emailConfigDialogOpen.value = true
+  resetMailEditor()
   void loadMailConfig()
 }
 
@@ -1278,14 +1524,22 @@ const closeThirdPartyAuthDialog = () => {
   oauthServices.value = []
 }
 
-const closeEmailConfigDialog = () => {
-  if (mailConfigBusy.value) return
+const performCloseEmailConfigDialog = () => {
   mailConfigLoadVersion += 1
   emailConfigDialogOpen.value = false
+  mailDiscardDialogOpen.value = false
+  pendingMailAction = null
   mailConfigLoadError.value = ''
   mailConfigSaveError.value = ''
   mailConfigSuccess.value = ''
-  mailPasswordVisible.value = false
+  mailConfigs.value = []
+  mailEndpoints.value = []
+  resetMailEditor()
+}
+
+const closeEmailConfigDialog = () => {
+  if (mailConfigBusy.value) return
+  runAfterMailDiscard(performCloseEmailConfigDialog)
 }
 
 const clearContext = async () => {
@@ -1524,6 +1778,10 @@ onBeforeUnmount(() => {
   margin: 0 auto;
 }
 
+.email-config-shell-wide {
+  width: min(1120px, 100%);
+}
+
 .email-config-intro {
   display: flex;
   align-items: center;
@@ -1572,6 +1830,104 @@ onBeforeUnmount(() => {
 
 .email-config-state .v-btn {
   margin-top: 6px;
+}
+
+.email-config-workspace {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  min-height: 480px;
+  overflow: hidden;
+  border: 1px solid var(--site-border);
+  border-radius: 12px;
+  background: var(--site-surface);
+}
+
+.email-account-panel {
+  min-width: 0;
+  border-right: 1px solid var(--site-border);
+  background: color-mix(in srgb, var(--site-soft) 40%, var(--site-surface));
+}
+
+.email-config-workspace-mobile {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.email-config-workspace-mobile .email-account-panel {
+  border-right: 0;
+}
+
+.email-account-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 72px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--site-border);
+}
+
+.email-account-panel-header > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.email-account-panel-header strong {
+  font-size: 0.9rem;
+}
+
+.email-account-panel-header span {
+  color: var(--site-muted);
+  font-size: 0.72rem;
+}
+
+.email-account-list {
+  padding: 8px;
+  background: transparent;
+}
+
+.email-account-list :deep(.v-list-item) {
+  margin-bottom: 4px;
+  border-radius: 8px;
+}
+
+.email-account-list :deep(.v-list-item-subtitle) {
+  white-space: pre-line;
+  line-height: 1.5;
+}
+
+.email-account-empty,
+.email-editor-placeholder {
+  min-height: 330px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+  color: var(--site-muted);
+}
+
+.email-account-empty strong,
+.email-editor-placeholder h3 {
+  color: var(--site-text);
+}
+
+.email-account-empty span,
+.email-editor-placeholder p {
+  max-width: 340px;
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+
+.email-editor-panel {
+  min-width: 0;
+  padding: 24px;
+}
+
+.email-mobile-back {
+  justify-self: start;
+  margin-left: -12px;
 }
 
 .oauth-service-list {
@@ -1651,6 +2007,8 @@ onBeforeUnmount(() => {
 }
 
 .email-config-form {
+  width: min(640px, 100%);
+  margin: 0 auto;
   display: grid;
   gap: 18px;
 }
@@ -1678,6 +2036,7 @@ onBeforeUnmount(() => {
 .email-config-status span {
   color: var(--site-muted);
   font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 .email-endpoint-select :deep(.v-field__input),
@@ -2181,6 +2540,12 @@ onBeforeUnmount(() => {
   }
   .email-config-content {
     padding: 24px 20px max(24px, env(safe-area-inset-bottom));
+  }
+  .email-config-workspace {
+    min-height: 400px;
+  }
+  .email-editor-panel {
+    padding: 18px 16px;
   }
   .email-config-intro {
     align-items: flex-start;
