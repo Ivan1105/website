@@ -410,32 +410,44 @@
 
             <div v-else class="oauth-service-list" aria-label="第三方服务列表">
               <article v-for="service in oauthServices" :key="service.appKey" class="oauth-service-row">
-                <div class="oauth-service-main">
-                  <div class="oauth-service-heading">
-                    <div class="oauth-service-title">
-                      <h3>{{ service.displayName }}</h3>
-                      <span>{{ service.appKey }}</span>
-                    </div>
-                    <v-chip :color="service.connected ? 'success' : undefined" variant="tonal" size="small"
-                      :prepend-icon="service.connected ? 'mdi-check-circle-outline' : 'mdi-link-off'">
-                      {{ service.connected ? '已连接' : '未连接' }}
-                    </v-chip>
-                  </div>
+                <div class="oauth-service-summary">
+                  <v-avatar size="48" color="surface-variant" class="oauth-service-avatar">
+                    <v-img v-if="assetUrl(service.iconPath, 'apps')" :src="assetUrl(service.iconPath, 'apps')"
+                      :alt="`${service.displayName} 图标`" cover>
+                      <template #error>
+                        <v-icon icon="mdi-apps" color="secondary" size="24" aria-hidden="true" />
+                      </template>
+                    </v-img>
+                    <v-icon v-else icon="mdi-apps" color="secondary" size="24" aria-hidden="true" />
+                  </v-avatar>
 
-                  <dl v-if="service.status || service.scope || service.expiresAt" class="oauth-service-meta">
-                    <div v-if="service.status">
-                      <dt>状态</dt>
-                      <dd>{{ service.status }}</dd>
+                  <div class="oauth-service-main">
+                    <div class="oauth-service-heading">
+                      <div class="oauth-service-title">
+                        <h3>{{ service.displayName }}</h3>
+                        <span>{{ service.appKey }}</span>
+                      </div>
+                      <v-chip :color="service.connected ? 'success' : undefined" variant="tonal" size="small"
+                        :prepend-icon="service.connected ? 'mdi-check-circle-outline' : 'mdi-link-off'">
+                        {{ service.connected ? '已连接' : '未连接' }}
+                      </v-chip>
                     </div>
-                    <div v-if="service.scope">
-                      <dt>授权范围</dt>
-                      <dd>{{ service.scope }}</dd>
-                    </div>
-                    <div v-if="service.expiresAt">
-                      <dt>到期时间</dt>
-                      <dd>{{ formatOAuthExpiresAt(service.expiresAt) }}</dd>
-                    </div>
-                  </dl>
+
+                    <dl v-if="service.status || service.scope || service.expiresAt" class="oauth-service-meta">
+                      <div v-if="service.status">
+                        <dt>状态</dt>
+                        <dd>{{ service.status }}</dd>
+                      </div>
+                      <div v-if="service.scope">
+                        <dt>授权范围</dt>
+                        <dd>{{ service.scope }}</dd>
+                      </div>
+                      <div v-if="service.expiresAt">
+                        <dt>到期时间</dt>
+                        <dd>{{ formatOAuthExpiresAt(service.expiresAt) }}</dd>
+                      </div>
+                    </dl>
+                  </div>
                 </div>
 
                 <v-btn class="oauth-service-action" :color="service.connected ? 'error' : 'primary'"
@@ -1951,9 +1963,26 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.oauth-service-summary {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 14px;
+}
+
+.oauth-service-main {
+  flex: 1;
+}
+
+.oauth-service-avatar {
+  flex: 0 0 auto;
+  border: 1px solid var(--site-border);
+}
+
 .oauth-service-heading {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
 }
 

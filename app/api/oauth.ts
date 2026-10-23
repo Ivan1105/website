@@ -3,6 +3,7 @@ import { useHttp, unwrap, type Envelope } from './http'
 export interface OAuthServiceDTO {
   appKey: string
   displayName: string
+  iconPath: string | null
   connected: boolean
   status: string | null
   scope: string | null

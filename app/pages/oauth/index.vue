@@ -20,9 +20,19 @@
         <p class="oauth-result-description">{{ resultDescription }}</p>
 
         <div v-if="validCallback" class="oauth-application">
-          <span>第三方服务</span>
-          <strong>{{ applicationName }}</strong>
-          <code>{{ applicationKey }}</code>
+          <v-avatar size="52" color="surface-variant" class="oauth-application-icon">
+            <v-img v-if="applicationIconUrl" :src="applicationIconUrl" :alt="`${applicationName} 图标`" cover>
+              <template #error>
+                <v-icon icon="mdi-apps" color="secondary" size="26" aria-hidden="true" />
+              </template>
+            </v-img>
+            <v-icon v-else icon="mdi-apps" color="secondary" size="26" aria-hidden="true" />
+          </v-avatar>
+          <div class="oauth-application-details">
+            <span>第三方服务</span>
+            <strong>{{ applicationName }}</strong>
+            <code>{{ applicationKey }}</code>
+          </div>
         </div>
 
         <v-alert v-if="applicationInfoError" type="warning" variant="tonal" density="comfortable"
@@ -62,6 +72,7 @@ type OAuthResultTone = 'success' | 'error' | 'warning'
 const AUTO_CLOSE_DELAY = 3000
 const route = useRoute()
 const { oauthApi } = useOAuthApi()
+const { assetUrl } = useAssetUrl()
 
 const firstQueryValue = (value: unknown): string => {
   if (Array.isArray(value)) {
@@ -86,6 +97,7 @@ const applicationInfoError = shallowRef('')
 const closeAttempted = shallowRef(false)
 
 const applicationName = computed(() => application.value?.displayName || applicationKey.value)
+const applicationIconUrl = computed(() => assetUrl(application.value?.iconPath, 'apps'))
 const resultTone = computed<OAuthResultTone>(() => {
   if (!validCallback.value) return 'warning'
   return callbackStatus.value === 'success' ? 'success' : 'error'
@@ -222,27 +234,40 @@ onMounted(() => {
 }
 
 .oauth-application {
-  display: grid;
+  display: flex;
+  align-items: center;
   width: 100%;
-  gap: 2px;
+  gap: 14px;
   margin-top: 28px;
   padding: 18px 20px;
   border: 1px solid var(--site-border);
   border-radius: var(--site-radius);
   background: var(--site-bg);
+  text-align: left;
 }
 
-.oauth-application span {
+.oauth-application-icon {
+  flex: 0 0 auto;
+  border: 1px solid var(--site-border);
+}
+
+.oauth-application-details {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.oauth-application-details span {
   color: var(--site-muted);
   font-size: 0.72rem;
 }
 
-.oauth-application strong {
+.oauth-application-details strong {
   font-size: 1.05rem;
   overflow-wrap: anywhere;
 }
 
-.oauth-application code {
+.oauth-application-details code {
   color: var(--site-accent);
   font-size: 0.72rem;
   overflow-wrap: anywhere;
