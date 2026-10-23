@@ -70,37 +70,39 @@ const firstQueryValue = (value: unknown): string => {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-const statusQuery = firstQueryValue(route.query.oauth_status)
-const applicationKey = firstQueryValue(route.query.application)
-const reason = firstQueryValue(route.query.reason)
-const callbackStatus: OAuthCallbackStatus | null = statusQuery === 'success' || statusQuery === 'error'
-  ? statusQuery
-  : null
-const validCallback = callbackStatus !== null && applicationKey.length > 0
+const statusQuery = computed(() => firstQueryValue(route.query.oauth_status))
+const applicationKey = computed(() => firstQueryValue(route.query.application))
+const reason = computed(() => firstQueryValue(route.query.reason))
+const callbackStatus = computed<OAuthCallbackStatus | null>(() => {
+  return statusQuery.value === 'success' || statusQuery.value === 'error'
+    ? statusQuery.value
+    : null
+})
+const validCallback = computed(() => callbackStatus.value !== null && applicationKey.value.length > 0)
 
-const loading = shallowRef(validCallback)
+const loading = shallowRef(true)
 const application = shallowRef<OAuthServiceDTO | null>(null)
 const applicationInfoError = shallowRef('')
 const closeAttempted = shallowRef(false)
 
-const applicationName = computed(() => application.value?.displayName || applicationKey)
+const applicationName = computed(() => application.value?.displayName || applicationKey.value)
 const resultTone = computed<OAuthResultTone>(() => {
-  if (!validCallback) return 'warning'
-  return callbackStatus === 'success' ? 'success' : 'error'
+  if (!validCallback.value) return 'warning'
+  return callbackStatus.value === 'success' ? 'success' : 'error'
 })
 const resultIcon = computed(() => {
-  if (!validCallback) return 'mdi-alert-outline'
-  return callbackStatus === 'success' ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline'
+  if (!validCallback.value) return 'mdi-alert-outline'
+  return callbackStatus.value === 'success' ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline'
 })
 const resultTitle = computed(() => {
-  if (!validCallback) return '授权结果无效'
-  return callbackStatus === 'success' ? `${applicationName.value}授权成功` : '授权未完成'
+  if (!validCallback.value) return '授权结果无效'
+  return callbackStatus.value === 'success' ? `${applicationName.value}授权成功` : '授权未完成'
 })
 const resultDescription = computed(() => {
-  if (!validCallback) return '缺少必要的授权结果信息，请返回聊天页面重新发起授权。'
-  if (callbackStatus === 'success') return `已成功连接${applicationName.value}，现在可以在对话中使用对应的服务能力。`
-  if (reason === 'invalid_state') return '授权请求已失效或状态校验失败，请返回聊天页面重新发起授权。'
-  if (reason) return `第三方服务返回错误：${reason}。请返回聊天页面重新发起授权。`
+  if (!validCallback.value) return '缺少必要的授权结果信息，请返回聊天页面重新发起授权。'
+  if (callbackStatus.value === 'success') return `已成功连接${applicationName.value}，现在可以在对话中使用对应的服务能力。`
+  if (reason.value === 'invalid_state') return '授权请求已失效或状态校验失败，请返回聊天页面重新发起授权。'
+  if (reason.value) return `第三方服务返回错误：${reason.value}。请返回聊天页面重新发起授权。`
   return '第三方服务未能完成授权，请返回聊天页面重新尝试。'
 })
 
@@ -113,18 +115,22 @@ const attemptClose = () => {
 const closeTimer = useTimer(attemptClose, { duration: AUTO_CLOSE_DELAY })
 const countdownSeconds = computed(() => Math.max(1, Math.ceil(closeTimer.remaining.value / 1000)))
 
-const loadApplication = async () => {
-  if (!validCallback) return
+const loadApplication = async (appKey: string, status: OAuthCallbackStatus) => {
+  loading.value = true
+  application.value = null
+  applicationInfoError.value = ''
+  closeAttempted.value = false
+  closeTimer.stop()
 
   try {
-    application.value = await oauthApi.getService(applicationKey)
+    application.value = await oauthApi.getService(appKey)
   } catch (error) {
     applicationInfoError.value = isApiError(error) && error.status === 401
       ? '登录状态已失效，暂时无法读取应用信息。请返回聊天页面重新登录。'
       : '暂时无法读取应用信息，已使用应用标识展示授权结果。'
   } finally {
     loading.value = false
-    if (callbackStatus === 'success') closeTimer.start()
+    if (status === 'success') closeTimer.start()
   }
 }
 
@@ -134,7 +140,14 @@ useSeoMeta({
 })
 
 onMounted(() => {
-  if (validCallback) void loadApplication()
+  watch([callbackStatus, applicationKey], ([status, appKey]) => {
+    if (!status || !appKey) {
+      loading.value = false
+      return
+    }
+
+    void loadApplication(appKey, status)
+  }, { immediate: true })
 })
 </script>
 
