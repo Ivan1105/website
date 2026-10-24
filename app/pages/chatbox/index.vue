@@ -60,16 +60,11 @@
                     aria-label="自动记录日记" @click.stop @update:model-value="updateJournal" />
                 </template>
               </v-list-item>
-              <v-list-item class="chat-setting-item" prepend-icon="mdi-email-outline" @click="openEmailConfigDialog">
-                <v-list-item-title>配置邮箱连接</v-list-item-title>
-                <v-list-item-subtitle class="chat-setting-description">
-                  连接邮箱后，可获取最新邮件并总结邮件内容。
-                </v-list-item-subtitle>
-              </v-list-item>
-              <v-list-item class="chat-setting-item" prepend-icon="mdi-shield-key-outline" @click="openThirdPartyAuthDialog">
+              <v-list-item class="chat-setting-item" prepend-icon="mdi-shield-key-outline"
+                @click="openServiceConnectionsDialog">
                 <v-list-item-title>第三方服务授权</v-list-item-title>
                 <v-list-item-subtitle class="chat-setting-description">
-                  授权第三方服务后，可在对话中使用对应的服务能力。
+                  连接邮箱或授权第三方应用后，可在对话中使用对应的服务能力。
                 </v-list-item-subtitle>
               </v-list-item>
               <v-divider />
@@ -187,18 +182,24 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-    <v-dialog v-model="emailConfigDialogOpen" persistent fullscreen transition="dialog-bottom-transition">
+    <v-dialog v-model="serviceConnectionsDialogOpen" persistent fullscreen transition="dialog-bottom-transition">
       <v-card class="email-config-page">
         <v-toolbar class="email-config-toolbar" color="surface" flat>
-          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="mailConfigBusy"
-            @click="closeEmailConfigDialog" />
-          <v-toolbar-title>配置邮箱连接</v-toolbar-title>
-          <v-btn icon="mdi-close" variant="text" aria-label="关闭邮箱连接配置" :disabled="mailConfigBusy"
-            @click="closeEmailConfigDialog" />
+          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="serviceConnectionsBusy"
+            @click="closeServiceConnectionsDialog" />
+          <v-toolbar-title>第三方服务授权</v-toolbar-title>
+          <v-btn icon="mdi-close" variant="text" aria-label="关闭第三方服务授权"
+            :disabled="serviceConnectionsBusy" @click="closeServiceConnectionsDialog" />
         </v-toolbar>
         <v-divider />
+        <v-tabs :model-value="serviceConnectionTab" class="service-connections-tabs" color="secondary" grow
+          :disabled="serviceConnectionsBusy" @update:model-value="requestServiceConnectionTab">
+          <v-tab value="oauth" prepend-icon="mdi-apps">应用授权</v-tab>
+          <v-tab value="email" prepend-icon="mdi-email-outline">邮箱连接</v-tab>
+        </v-tabs>
+        <v-divider />
         <v-card-text class="email-config-content">
-          <div class="email-config-shell email-config-shell-wide">
+          <div v-if="serviceConnectionTab === 'email'" class="email-config-shell email-config-shell-wide">
             <header class="email-config-intro">
               <span class="email-config-icon" aria-hidden="true">
                 <v-icon icon="mdi-email-sync-outline" color="secondary" size="38" />
@@ -350,33 +351,8 @@
               </section>
             </div>
           </div>
-        </v-card-text>
-      </v-card>
-    </v-dialog>
-    <v-dialog v-model="mailDiscardDialogOpen" persistent max-width="440">
-      <v-card>
-        <v-card-title>放弃未保存的修改？</v-card-title>
-        <v-card-text>当前邮箱配置有尚未保存的修改。继续后，这些修改将会丢失。</v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" :disabled="mailConfigBusy" @click="cancelMailDiscard">继续编辑</v-btn>
-          <v-btn color="error" variant="tonal" :disabled="mailConfigBusy" @click="confirmMailDiscard">放弃修改</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-    <v-dialog v-model="thirdPartyAuthDialogOpen" :persistent="oauthActionPending" fullscreen
-      transition="dialog-bottom-transition">
-      <v-card class="email-config-page">
-        <v-toolbar class="email-config-toolbar" color="surface" flat>
-          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="oauthActionPending"
-            @click="closeThirdPartyAuthDialog" />
-          <v-toolbar-title>第三方服务授权</v-toolbar-title>
-          <v-btn icon="mdi-close" variant="text" aria-label="关闭第三方服务授权"
-            :disabled="oauthActionPending" @click="closeThirdPartyAuthDialog" />
-        </v-toolbar>
-        <v-divider />
-        <v-card-text class="email-config-content">
-          <div class="email-config-shell">
+
+          <div v-else class="email-config-shell">
             <header class="email-config-intro">
               <span class="email-config-icon" aria-hidden="true">
                 <v-icon icon="mdi-connection" color="secondary" size="38" />
@@ -465,6 +441,17 @@
         </v-card-text>
       </v-card>
     </v-dialog>
+    <v-dialog v-model="mailDiscardDialogOpen" persistent max-width="440">
+      <v-card>
+        <v-card-title>放弃未保存的修改？</v-card-title>
+        <v-card-text>当前邮箱配置有尚未保存的修改。继续后，这些修改将会丢失。</v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" :disabled="mailConfigBusy" @click="cancelMailDiscard">继续编辑</v-btn>
+          <v-btn color="error" variant="tonal" :disabled="mailConfigBusy" @click="confirmMailDiscard">放弃修改</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
     <v-dialog v-model="oauthRevokeDialogOpen" :persistent="oauthRevokingAppKey !== null" max-width="440">
       <v-card>
         <v-card-title>取消第三方服务授权</v-card-title>
@@ -505,6 +492,7 @@ const { assetUrl } = useAssetUrl()
 type ToolCallStatus = 'running' | 'success' | 'error'
 type MailField = 'displayName' | 'endpoint' | 'username' | 'password'
 type MailEditorMode = 'none' | 'create' | 'edit'
+type ServiceConnectionTab = 'oauth' | 'email'
 interface MailConfigForm {
   displayName: string
   endpointKey: string
@@ -563,8 +551,8 @@ const messagesTotal = ref(0)
 const activeRunId = ref<string | null>(null)
 const creatingThread = ref(false)
 const clearContextDialogOpen = ref(false)
-const emailConfigDialogOpen = ref(false)
-const thirdPartyAuthDialogOpen = ref(false)
+const serviceConnectionsDialogOpen = ref(false)
+const serviceConnectionTab = shallowRef<ServiceConnectionTab>('oauth')
 const oauthServices = ref<OAuthServiceDTO[]>([])
 const oauthServicesLoading = ref(false)
 const oauthServicesError = ref('')
@@ -685,6 +673,7 @@ const mailConfigUpdatedAt = computed(() => {
 })
 const busy = computed(() => authRequired.value || sending.value || creatingThread.value || loading.value || conversationsLoading.value)
 const oauthActionPending = computed(() => oauthAuthorizingAppKey.value !== null || oauthRevokingAppKey.value !== null)
+const serviceConnectionsBusy = computed(() => mailConfigBusy.value || oauthActionPending.value)
 const conversationSelectionDisabled = computed(() => authRequired.value || creatingThread.value || loading.value || conversationsLoading.value)
 const historyLoaderLabel = computed(() => `加载更早的消息，当前已显示 ${currentMessages.value.length} 条，共 ${messagesTotal.value} 条`)
 const MESSAGES_PAGE_SIZE = 20
@@ -924,7 +913,9 @@ const loadMailConfig = async () => {
       mailApi.getImapConfigs(),
       mailApi.getEndpoints(),
     ])
-    if (loadVersion !== mailConfigLoadVersion || !emailConfigDialogOpen.value) return
+    if (loadVersion !== mailConfigLoadVersion
+      || !serviceConnectionsDialogOpen.value
+      || serviceConnectionTab.value !== 'email') return
     mailEndpoints.value = endpoints
     mailConfigs.value = configs
     if (configs[0]) applyMailConfig(configs[0])
@@ -933,7 +924,7 @@ const loadMailConfig = async () => {
   } catch (error) {
     if (loadVersion !== mailConfigLoadVersion) return
     if (handleUnauthorized(error)) {
-      performCloseEmailConfigDialog()
+      performCloseServiceConnectionsDialog()
       return
     }
     mailConfigLoadError.value = isApiError(error) ? error.message : '邮箱配置或服务器列表加载失败，请稍后重试。'
@@ -950,12 +941,14 @@ const loadOAuthServices = async () => {
 
   try {
     const services = await oauthApi.getServices()
-    if (loadVersion !== oauthServicesLoadVersion || !thirdPartyAuthDialogOpen.value) return
+    if (loadVersion !== oauthServicesLoadVersion
+      || !serviceConnectionsDialogOpen.value
+      || serviceConnectionTab.value !== 'oauth') return
     oauthServices.value = services
   } catch (error) {
     if (loadVersion !== oauthServicesLoadVersion) return
     if (handleUnauthorized(error)) {
-      thirdPartyAuthDialogOpen.value = false
+      performCloseServiceConnectionsDialog()
       return
     }
     oauthServicesError.value = isApiError(error) ? error.message : '第三方服务列表加载失败，请稍后重试。'
@@ -997,7 +990,7 @@ const authorizeOAuthService = async (service: OAuthServiceDTO) => {
   } catch (error) {
     authorizationWindow.close()
     if (handleUnauthorized(error)) {
-      thirdPartyAuthDialogOpen.value = false
+      performCloseServiceConnectionsDialog()
       return
     }
     showError(isApiError(error)
@@ -1037,7 +1030,7 @@ const revokeOAuthAuthorization = async () => {
     if (handleUnauthorized(error)) {
       oauthRevokeDialogOpen.value = false
       oauthRevokeTarget.value = null
-      thirdPartyAuthDialogOpen.value = false
+      performCloseServiceConnectionsDialog()
       return
     }
     showError(isApiError(error) ? error.message : '取消授权失败，请稍后重试。')
@@ -1048,8 +1041,13 @@ const revokeOAuthAuthorization = async () => {
 
 const refreshOAuthServicesOnFocus = () => {
   if (!oauthRefreshOnFocus.value) return
+  if (!serviceConnectionsDialogOpen.value) {
+    oauthRefreshOnFocus.value = false
+    return
+  }
+  if (serviceConnectionTab.value !== 'oauth') return
   oauthRefreshOnFocus.value = false
-  if (thirdPartyAuthDialogOpen.value) void loadOAuthServices()
+  void loadOAuthServices()
 }
 
 const persistMailConfig = async (): Promise<number | null> => {
@@ -1102,7 +1100,7 @@ const persistMailConfig = async (): Promise<number | null> => {
     return configId
   } catch (error) {
     if (handleUnauthorized(error)) {
-      performCloseEmailConfigDialog()
+      performCloseServiceConnectionsDialog()
       return null
     }
     mailConfigSaveError.value = isApiError(error) ? error.message : '邮箱配置保存失败，请稍后重试。'
@@ -1166,7 +1164,7 @@ const testMailConnection = async () => {
     }
   } catch (error) {
     if (handleUnauthorized(error)) {
-      performCloseEmailConfigDialog()
+      performCloseServiceConnectionsDialog()
       return
     }
     const message = isApiError(error) ? error.message : '邮箱连接测试失败，请稍后重试。'
@@ -1512,46 +1510,77 @@ const openClearContextDialog = () => {
   clearContextDialogOpen.value = true
 }
 
-const openEmailConfigDialog = () => {
-  settingsMenuOpen.value = false
-  emailConfigDialogOpen.value = true
-  resetMailEditor()
-  void loadMailConfig()
-}
-
-const openThirdPartyAuthDialog = () => {
-  settingsMenuOpen.value = false
-  thirdPartyAuthDialogOpen.value = true
-  void loadOAuthServices()
-}
-
-const closeThirdPartyAuthDialog = () => {
-  if (oauthActionPending.value) return
-  oauthServicesLoadVersion += 1
-  oauthRevokeDialogOpen.value = false
-  oauthRevokeTarget.value = null
-  thirdPartyAuthDialogOpen.value = false
-  oauthServicesLoading.value = false
-  oauthServicesError.value = ''
-  oauthServices.value = []
-}
-
-const performCloseEmailConfigDialog = () => {
+const resetServiceConnectionsState = () => {
   mailConfigLoadVersion += 1
-  emailConfigDialogOpen.value = false
+  oauthServicesLoadVersion += 1
   mailDiscardDialogOpen.value = false
   pendingMailAction = null
+  mailConfigLoading.value = false
   mailConfigLoadError.value = ''
   mailConfigSaveError.value = ''
   mailConfigSuccess.value = ''
   mailConfigs.value = []
   mailEndpoints.value = []
   resetMailEditor()
+  oauthRevokeDialogOpen.value = false
+  oauthRevokeTarget.value = null
+  oauthRefreshOnFocus.value = false
+  oauthServicesLoading.value = false
+  oauthServicesError.value = ''
+  oauthServices.value = []
 }
 
-const closeEmailConfigDialog = () => {
-  if (mailConfigBusy.value) return
-  runAfterMailDiscard(performCloseEmailConfigDialog)
+const openServiceConnectionsDialog = () => {
+  settingsMenuOpen.value = false
+  resetServiceConnectionsState()
+  serviceConnectionTab.value = 'oauth'
+  serviceConnectionsDialogOpen.value = true
+  void loadOAuthServices()
+}
+
+const activateServiceConnectionTab = (tab: ServiceConnectionTab) => {
+  mailConfigLoadVersion += 1
+  oauthServicesLoadVersion += 1
+  mailConfigLoading.value = false
+  oauthServicesLoading.value = false
+  serviceConnectionTab.value = tab
+
+  if (tab === 'email') {
+    resetMailEditor()
+    void loadMailConfig()
+    return
+  }
+
+  resetMailEditor()
+  mailConfigLoadError.value = ''
+  mailConfigSaveError.value = ''
+  mailConfigSuccess.value = ''
+  oauthRefreshOnFocus.value = false
+  void loadOAuthServices()
+}
+
+const requestServiceConnectionTab = (value: unknown) => {
+  if ((value !== 'oauth' && value !== 'email')
+    || value === serviceConnectionTab.value
+    || serviceConnectionsBusy.value) return
+
+  const switchTab = () => activateServiceConnectionTab(value)
+  if (serviceConnectionTab.value === 'email') {
+    runAfterMailDiscard(switchTab)
+    return
+  }
+  switchTab()
+}
+
+const performCloseServiceConnectionsDialog = () => {
+  serviceConnectionsDialogOpen.value = false
+  serviceConnectionTab.value = 'oauth'
+  resetServiceConnectionsState()
+}
+
+const closeServiceConnectionsDialog = () => {
+  if (serviceConnectionsBusy.value) return
+  runAfterMailDiscard(performCloseServiceConnectionsDialog)
 }
 
 const clearContext = async () => {
@@ -1776,6 +1805,18 @@ onBeforeUnmount(() => {
   font-size: 1rem;
   font-weight: 700;
   text-align: center;
+}
+
+.service-connections-tabs {
+  flex: 0 0 auto;
+  width: min(560px, 100%);
+  align-self: center;
+  background: var(--site-surface);
+}
+
+.service-connections-tabs :deep(.v-tab) {
+  min-height: 52px;
+  font-weight: 650;
 }
 
 .email-config-content {
