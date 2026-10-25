@@ -7,6 +7,7 @@
     <div class="chatbox-container">
       <aside class="desktop-conversations surface-card" aria-label="会话列表">
         <ConversationList :conversations="conversations" :selected="currentConversationId" :pending="conversationsLoading"
+          :unread-by-thread="notificationStore.unreadByThread"
           :error="conversationsError" :disabled="conversationSelectionDisabled" @select="selectConversation" />
       </aside>
       <section class="chat-area surface-card" aria-label="聊天">
@@ -18,6 +19,7 @@
             </template>
             <v-card class="drawer-card">
               <ConversationList :conversations="conversations" :selected="currentConversationId" :pending="conversationsLoading"
+                :unread-by-thread="notificationStore.unreadByThread"
                 :error="conversationsError" :disabled="conversationSelectionDisabled" @select="selectConversation">
                 <template #actions><v-btn icon="mdi-close" variant="text" aria-label="关闭会话列表" @click="drawerOpen = false" /></template>
               </ConversationList>
@@ -478,6 +480,7 @@
 <script setup lang="ts">
 import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type MailEndpointDTO, type MessageDTO, type OAuthServiceDTO, type UpdateImapConfigReq } from '@/api'
 import { useAppStore } from '@/stores/app'
+import { useNotificationStore } from '@/stores/notifications'
 import { useDisplay } from 'vuetify'
 import DOMPurify from 'isomorphic-dompurify'
 import MarkdownIt from 'markdown-it'
@@ -487,6 +490,10 @@ const { chatApi } = useChatApi()
 const { mailApi } = useMailApi()
 const { oauthApi } = useOAuthApi()
 const appStore = useAppStore()
+const notificationStore = useNotificationStore()
+const route = useRoute()
+const router = useRouter()
+const { clearUnread, setActiveThread } = useNotificationCenter()
 const { mobile } = useDisplay()
 const { assetUrl } = useAssetUrl()
 type ToolCallStatus = 'running' | 'success' | 'error'
@@ -683,6 +690,7 @@ let mailConfigLoadVersion = 0
 let oauthServicesLoadVersion = 0
 let pendingMailAction: (() => void) | null = null
 let streamAbortController: AbortController | null = null
+let pendingNotificationRefresh: string | null = null
 const activeStreamMessageKeys = new Set<string>()
 watch(mobile, value => {
   if (!value) drawerOpen.value = false
@@ -1180,7 +1188,9 @@ const loadConversations = async () => {
   authRequired.value = false
   try {
     conversations.value = await chatApi.getConversations()
-    currentConversationId.value = conversations.value[0]?.name || ''
+    const requestedThread = typeof route.query.thread === 'string' ? route.query.thread : ''
+    const requestedConversation = conversations.value.find(conversation => conversation.thread_id === requestedThread)
+    currentConversationId.value = requestedConversation?.name ?? conversations.value[0]?.name ?? ''
   } catch (error) {
     conversations.value = []
     if (!handleUnauthorized(error)) conversationsError.value = '会话列表加载失败。'
@@ -1206,6 +1216,7 @@ const loadMessages = async () => {
     messagesPage.value = result.pagination.page
     messagesHasMore.value = result.pagination.has_more
     messagesTotal.value = result.pagination.total
+    clearUnread(threadId)
     activeRun = result.active_run
     if (activeRun) {
       const userMessage = activeRun.user_message
@@ -1469,7 +1480,68 @@ const selectConversation = async (id: string) => {
   currentConversationId.value = id
   currentMessages.value = []
   await loadMessages()
+  const threadId = currentConversation.value?.thread_id
+  if (threadId && route.query.thread !== threadId) {
+    await router.replace({ query: { ...route.query, thread: threadId } })
+  }
 }
+
+const refreshCurrentThreadFromNotification = async (threadId: string) => {
+  if (currentConversation.value?.thread_id !== threadId) return
+  if (loading.value || sending.value || activeRunId.value) {
+    pendingNotificationRefresh = threadId
+    return
+  }
+
+  const loadVersion = messagesLoadVersion
+  try {
+    const result = await chatApi.getMessages(threadId, 0, MESSAGES_PAGE_SIZE)
+    if (loadVersion !== messagesLoadVersion || currentConversation.value?.thread_id !== threadId) return
+
+    const latestIds = new Set(result.messages.map(message => message.id))
+    const olderHistory = currentMessages.value.filter(message => message.id && !latestIds.has(message.id))
+    currentMessages.value = [
+      ...olderHistory,
+      ...result.messages.map(toHistoryMessage),
+    ].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
+    messagesPage.value = result.pagination.page
+    messagesHasMore.value = result.pagination.has_more
+    messagesTotal.value = result.pagination.total
+    clearUnread(threadId)
+    await nextTick()
+    scrollToBottom()
+  } catch (error) {
+    if (!handleUnauthorized(error)) showError('新消息刷新失败，请稍后重试。')
+  }
+}
+
+watch(currentConversation, (conversation) => {
+  setActiveThread(conversation?.thread_id ?? null)
+})
+
+watch(() => notificationStore.notificationRevision, () => {
+  const threadId = notificationStore.latestNotification?.thread_id
+  if (threadId && threadId === currentConversation.value?.thread_id) {
+    void refreshCurrentThreadFromNotification(threadId)
+  }
+})
+
+watch([loading, sending, activeRunId], ([isLoading, isSending, runId]) => {
+  if (isLoading || isSending || runId || !pendingNotificationRefresh) return
+  const threadId = pendingNotificationRefresh
+  pendingNotificationRefresh = null
+  void refreshCurrentThreadFromNotification(threadId)
+})
+
+watch(() => route.query.thread, async (value) => {
+  if (typeof value !== 'string' || conversationsLoading.value) return
+  const conversation = conversations.value.find(item => item.thread_id === value)
+  if (!conversation || conversation.name === currentConversationId.value) return
+  stopActiveStream()
+  currentConversationId.value = conversation.name
+  currentMessages.value = []
+  await loadMessages()
+})
 
 const updateProactiveReminder = async (value: boolean | null) => {
   const conversation = currentConversation.value
@@ -1659,6 +1731,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('focus', refreshOAuthServicesOnFocus)
+  setActiveThread(null)
   stopActiveStream()
 })
 </script>

@@ -1,5 +1,8 @@
 export { ApiError, isApiError } from './http'
 
+export { NotificationStreamError, useNotificationApi } from './notifications'
+export type { NotificationData, NotificationPingData, NotificationSource, NotificationStreamHandlers } from './notifications'
+
 export { useAdminApi } from './admin'
 export type { AdminPaginationDTO, AdminUserDTO, QueryUsersDTO, ResetPasswordDTO, UpdateActiveReq } from './admin'
 

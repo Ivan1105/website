@@ -18,8 +18,15 @@
           </v-avatar>
         </template>
         <v-list-item-title>{{ conv.display_name }}</v-list-item-title>
-        <v-list-item-subtitle>{{ selected === conv.name ? '当前会话' : '开始对话' }}</v-list-item-subtitle>
-        <template #append><v-icon v-if="selected === conv.name" icon="mdi-check" size="18" /></template>
+        <v-list-item-subtitle>
+          {{ selected === conv.name ? '当前会话' : unreadByThread[conv.thread_id || ''] ? `${unreadByThread[conv.thread_id || '']} 条未读` : '开始对话' }}
+        </v-list-item-subtitle>
+        <template #append>
+          <v-icon v-if="selected === conv.name" icon="mdi-check" size="18" />
+          <span v-else-if="unreadByThread[conv.thread_id || '']" class="unread-badge" :aria-label="`${unreadByThread[conv.thread_id || '']} 条未读消息`">
+            {{ Math.min(unreadByThread[conv.thread_id || ''] || 0, 99) }}{{ (unreadByThread[conv.thread_id || ''] || 0) > 99 ? '+' : '' }}
+          </span>
+        </template>
       </v-list-item>
     </v-list>
     <div class="list-footer"><span aria-hidden="true">01 /</span> 给每一个想法，一点回应。</div>
@@ -28,7 +35,14 @@
 
 <script setup lang="ts">
 import type { ConversationDTO } from '@/api'
-defineProps<{ conversations: ConversationDTO[], selected: string, pending: boolean, error: string, disabled: boolean }>()
+defineProps<{
+  conversations: ConversationDTO[]
+  selected: string
+  pending: boolean
+  error: string
+  disabled: boolean
+  unreadByThread: Record<string, number>
+}>()
 defineEmits<{ select: [id: string] }>()
 const { assetUrl } = useAssetUrl()
 </script>
@@ -94,6 +108,19 @@ const { assetUrl } = useAssetUrl()
   color: var(--site-muted);
   opacity: 1;
   margin-top: 4px;
+}
+
+.unread-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding-inline: 6px;
+  border-radius: 999px;
+  background: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-primary));
+  font-size: 0.68rem;
+  font-weight: 700;
 }
 
 .list-state {

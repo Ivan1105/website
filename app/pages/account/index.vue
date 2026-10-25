@@ -207,6 +207,26 @@
             </div>
           </dl>
 
+          <section class="notification-setting" aria-labelledby="desktop-notification-title">
+            <div class="notification-setting-copy">
+              <span class="notification-setting-icon" aria-hidden="true">
+                <v-icon icon="mdi-bell-outline" size="21" />
+              </span>
+              <div>
+                <h3 id="desktop-notification-title">桌面通知</h3>
+                <p>{{ desktopNotificationDescription }}</p>
+              </div>
+            </div>
+            <v-switch
+              :model-value="notificationStore.desktopEnabled"
+              color="primary"
+              hide-details
+              :disabled="desktopPermission === 'unsupported'"
+              aria-label="桌面通知"
+              @update:model-value="updateDesktopNotifications"
+            />
+          </section>
+
           <div class="account-actions">
             <div class="account-action-buttons">
               <v-btn
@@ -426,6 +446,12 @@ const appStore = useAppStore()
 const { accountApi } = useAccountApi()
 const { commonApi } = useCommonApi()
 const { initializeAuth } = useAuthSession()
+const {
+  store: notificationStore,
+  permission: desktopPermission,
+  requestDesktopPermission,
+  setDesktopEnabled,
+} = useNotificationCenter()
 const { assetUrl } = useAssetUrl()
 
 const accountInfo = ref<AccountInfoDTO | null>(null)
@@ -466,6 +492,38 @@ const bannerFileInput = useTemplateRef<HTMLInputElement>('banner-file-input')
 const bannerSaving = ref(false)
 const imageNotice = ref(false)
 const imageNoticeText = ref('')
+
+const desktopNotificationDescription = computed(() => {
+  if (desktopPermission.value === 'unsupported') return '当前浏览器不支持桌面通知，站内提醒仍会正常显示。'
+  if (desktopPermission.value === 'denied') return '浏览器已阻止通知；如需开启，请在浏览器网站权限中修改。'
+  if (notificationStore.desktopEnabled && desktopPermission.value === 'granted') return '页面在后台时，会通过系统通知提醒你。'
+  return '开启后，页面在后台时也能收到新消息提醒。'
+})
+
+const updateDesktopNotifications = async (value: boolean | null) => {
+  if (!value) {
+    setDesktopEnabled(false)
+    updateSuccessText.value = '桌面通知已关闭'
+    updateSuccess.value = true
+    return
+  }
+
+  if (desktopPermission.value === 'granted') {
+    setDesktopEnabled(true)
+    updateSuccessText.value = '桌面通知已开启'
+    updateSuccess.value = true
+    return
+  }
+
+  const result = await requestDesktopPermission()
+  if (result.enabled) {
+    updateSuccessText.value = result.message
+    updateSuccess.value = true
+  } else {
+    imageNoticeText.value = result.message
+    imageNotice.value = true
+  }
+}
 
 const displayName = computed(() => accountInfo.value?.nickname || accountInfo.value?.username || '个人中心')
 const accountAvatarUrl = computed(() => assetUrl(accountInfo.value?.avatar, 'icon'))
@@ -1202,6 +1260,51 @@ const handleLogout = async () => {
 
 .account-details a:hover {
   color: var(--site-accent);
+}
+
+.notification-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--site-border);
+  border-radius: var(--site-radius);
+  background: var(--site-soft);
+}
+
+.notification-setting-copy {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 14px;
+}
+
+.notification-setting-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--site-surface);
+  color: var(--site-accent);
+}
+
+.notification-setting h3 {
+  font-size: 0.92rem;
+}
+
+.notification-setting p {
+  margin-top: 4px;
+  color: var(--site-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.notification-setting :deep(.v-switch) {
+  flex: 0 0 auto;
 }
 
 .account-actions {

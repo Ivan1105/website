@@ -46,15 +46,33 @@
       </div>
     </v-app-bar>
     <v-main id="main-content" tabindex="-1"><nuxt-page /></v-main>
+    <v-snackbar
+      v-model="notificationSnackbarOpen"
+      class="notification-snackbar"
+      location="top end"
+      :timeout="7000"
+    >
+      <div class="notification-snackbar-copy">
+        <strong>{{ notificationTitle }}</strong>
+        <span>{{ notificationStore.activeSnackbarNotification?.preview || '有一条新消息' }}</span>
+      </div>
+      <template #actions>
+        <v-btn variant="text" @click="openNotification">查看</v-btn>
+        <v-btn icon="mdi-close" variant="text" aria-label="关闭提醒" @click="notificationStore.dismissSnackbar()" />
+      </template>
+    </v-snackbar>
   </v-app>
 </template>
 
 <script lang="ts" setup>
 import { useAuthSession } from '@/composables/useAuthSession'
 import { useAppStore } from '@/stores/app'
+import { useNotificationStore } from '@/stores/notifications'
 
 const appStore = useAppStore()
+const notificationStore = useNotificationStore()
 const { initializeAuth } = useAuthSession()
+const { start: startNotifications, stop: stopNotifications } = useNotificationService()
 const { assetUrl } = useAssetUrl()
 
 const navItems = [
@@ -65,8 +83,38 @@ const navItems = [
 const accountName = computed(() => appStore.userInfo?.username ?? '个人中心')
 const accountAvatarUrl = computed(() => assetUrl(appStore.userInfo?.avatar, 'icon'))
 
-onMounted(() => {
-  void initializeAuth()
+const notificationTitles = {
+  chat: '聊天回复',
+  reminder: '提醒消息',
+  proactive: '主动消息',
+  journal: '日记已完成',
+} as const
+const notificationTitle = computed(() => {
+  const source = notificationStore.activeSnackbarNotification?.source
+  return source ? notificationTitles[source] : '新消息'
+})
+const notificationSnackbarOpen = computed({
+  get: () => notificationStore.activeSnackbar !== null,
+  set: (open: boolean) => {
+    if (!open) notificationStore.dismissSnackbar()
+  },
+})
+
+const openNotification = async () => {
+  const notification = notificationStore.activeSnackbarNotification
+  if (!notification) return
+  notificationStore.dismissSnackbar()
+  await navigateTo({ path: '/chatbox', query: { thread: notification.thread_id } })
+}
+
+watch(() => appStore.userInfo?.user_id ?? null, (userId) => {
+  if (userId && appStore.token) startNotifications(userId)
+  else stopNotifications()
+})
+
+onMounted(async () => {
+  await initializeAuth()
+  if (appStore.token && appStore.userInfo) startNotifications(appStore.userInfo.user_id)
 })
 </script>
 
@@ -173,6 +221,34 @@ onMounted(() => {
   background: linear-gradient(90deg, var(--site-soft), #f8fcfb, var(--site-soft));
   background-size: 200% 100%;
   animation: account-loading 1.4s ease-in-out infinite;
+}
+
+.notification-snackbar-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.notification-snackbar-copy strong {
+  color: rgb(var(--v-theme-primary));
+  font-size: 0.82rem;
+}
+
+.notification-snackbar-copy span {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:global(.notification-snackbar .v-snackbar__wrapper) {
+  max-width: min(440px, calc(100vw - 24px));
+  border: 1px solid var(--site-border);
+  border-left: 4px solid rgb(var(--v-theme-primary));
+  border-radius: var(--site-radius);
+  background: var(--site-surface);
+  color: var(--site-text);
 }
 
 @keyframes account-loading {
