@@ -221,7 +221,8 @@
               :model-value="notificationStore.desktopEnabled"
               color="primary"
               hide-details
-              :disabled="desktopPermission === 'unsupported'"
+              :disabled="desktopNotificationsDisabled"
+              :loading="pushBusy"
               aria-label="桌面通知"
               @update:model-value="updateDesktopNotifications"
             />
@@ -445,10 +446,14 @@ const editorConfigs: Record<EditableField, EditorConfig> = {
 const appStore = useAppStore()
 const { accountApi } = useAccountApi()
 const { commonApi } = useCommonApi()
-const { initializeAuth } = useAuthSession()
+const { initializeAuth, logout } = useAuthSession()
 const {
   store: notificationStore,
   permission: desktopPermission,
+  pushBusy,
+  pushError,
+  pushSupport,
+  refreshPushSupport,
   requestDesktopPermission,
   setDesktopEnabled,
 } = useNotificationCenter()
@@ -494,24 +499,44 @@ const imageNotice = ref(false)
 const imageNoticeText = ref('')
 
 const desktopNotificationDescription = computed(() => {
-  if (desktopPermission.value === 'unsupported') return '当前浏览器不支持桌面通知，站内提醒仍会正常显示。'
+  if (pushSupport.value === 'checking') return '正在检查当前浏览器的消息推送能力。'
+  if (pushSupport.value === 'unconfigured') return '消息推送尚未配置，站内提醒仍会正常显示。'
+  if (pushSupport.value === 'unsupported') return '当前浏览器不支持消息推送，站内提醒仍会正常显示。'
   if (desktopPermission.value === 'denied') return '浏览器已阻止通知；如需开启，请在浏览器网站权限中修改。'
-  if (notificationStore.desktopEnabled && desktopPermission.value === 'granted') return '页面在后台时，会通过系统通知提醒你。'
-  return '开启后，页面在后台时也能收到新消息提醒。'
+  if (pushError.value) return pushError.value
+  if (notificationStore.desktopEnabled && desktopPermission.value === 'granted') return '页面关闭或在后台时，会通过系统通知提醒你。'
+  return '开启后，页面关闭或在后台时也能收到新消息提醒。'
 })
+
+const desktopNotificationsDisabled = computed(() => (
+  pushBusy.value
+  || pushSupport.value === 'checking'
+  || pushSupport.value === 'unconfigured'
+  || pushSupport.value === 'unsupported'
+))
 
 const updateDesktopNotifications = async (value: boolean | null) => {
   if (!value) {
-    setDesktopEnabled(false)
-    updateSuccessText.value = '桌面通知已关闭'
-    updateSuccess.value = true
+    const result = await setDesktopEnabled(false)
+    if (!result.enabled) {
+      updateSuccessText.value = result.message
+      updateSuccess.value = true
+    } else {
+      imageNoticeText.value = result.message
+      imageNotice.value = true
+    }
     return
   }
 
   if (desktopPermission.value === 'granted') {
-    setDesktopEnabled(true)
-    updateSuccessText.value = '桌面通知已开启'
-    updateSuccess.value = true
+    const result = await setDesktopEnabled(true)
+    if (result.enabled) {
+      updateSuccessText.value = result.message
+      updateSuccess.value = true
+      return
+    }
+    imageNoticeText.value = result.message
+    imageNotice.value = true
     return
   }
 
@@ -916,6 +941,7 @@ const savePassword = async () => {
 }
 
 onMounted(async () => {
+  await refreshPushSupport()
   await initializeAuth()
   if (appStore.isLoggedIn) {
     await loadAccountInfo()
@@ -929,7 +955,7 @@ watch(avatarCropOpen, (open) => {
 onBeforeUnmount(revokeAvatarSource)
 
 const handleLogout = async () => {
-  appStore.clearAuth()
+  await logout()
   accountInfo.value = null
   await navigateTo('/')
 }

@@ -17,6 +17,7 @@
     "@nuxtjs/i18n": "^10.2.3",
     "@vuetify/v0": "^1.2.1",
     "cropperjs": "^2.3.0",
+    "firebase": "^13.1.0",
     "isomorphic-dompurify": "^4.4.0",
     "markdown-it": "^15.0.2",
     "nuxt": "^4.4.2",

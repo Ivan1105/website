@@ -3,8 +3,6 @@ import { NotificationStreamError, useNotificationApi, type NotificationData } fr
 import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
 
-type NotificationPermissionState = NotificationPermission | 'unsupported'
-
 interface TabPresence {
   tabId: string
   visible: boolean
@@ -22,13 +20,6 @@ type ChannelMessage =
   | { type: 'snackbar', tabId: string, notification: NotificationData }
   | { type: 'desktop-setting', enabled: boolean }
   | { type: 'auth-invalid' }
-
-const SOURCE_TITLES: Record<NotificationData['source'], string> = {
-  chat: '聊天回复',
-  reminder: '提醒消息',
-  proactive: '主动消息',
-  journal: '日记已完成',
-}
 
 const LEASE_DURATION = 15_000
 const PRESENCE_MAX_AGE = 15_000
@@ -58,32 +49,37 @@ const isNewerEventId = (candidate: string, cursor: string) => {
 
 export const useNotificationCenter = () => {
   const store = useNotificationStore()
-
-  const permission = shallowRef<NotificationPermissionState>((() => {
-    if (!import.meta.client || !('Notification' in window)) return 'unsupported'
-    return window.Notification.permission
-  })())
+  const {
+    busy: pushBusy,
+    disablePush,
+    enablePush,
+    error: pushError,
+    permission,
+    refreshSupport: refreshPushSupport,
+    support: pushSupport,
+  } = useFirebasePush()
 
   const requestDesktopPermission = async () => {
-    if (!('Notification' in window)) {
-      store.setDesktopEnabled(false)
-      return { enabled: false, message: '当前浏览器不支持桌面通知。' }
+    const result = await enablePush()
+    if (result.enabled) {
+      store.setDesktopEnabled(true)
+      window.dispatchEvent(new CustomEvent('notification:desktop-setting', { detail: true }))
     }
-
-    const result = await window.Notification.requestPermission()
-    permission.value = result
-    const enabled = result === 'granted'
-    store.setDesktopEnabled(enabled)
-    window.dispatchEvent(new CustomEvent('notification:desktop-setting', { detail: enabled }))
-    return {
-      enabled,
-      message: enabled ? '桌面通知已开启。' : '浏览器未授予通知权限，将继续使用站内提醒。',
-    }
+    return result
   }
 
-  const setDesktopEnabled = (enabled: boolean) => {
-    store.setDesktopEnabled(enabled)
-    window.dispatchEvent(new CustomEvent('notification:desktop-setting', { detail: enabled }))
+  const setDesktopEnabled = async (enabled: boolean) => {
+    if (enabled) return requestDesktopPermission()
+
+    const result = await disablePush()
+    if (result.disabled) {
+      store.setDesktopEnabled(false)
+      window.dispatchEvent(new CustomEvent('notification:desktop-setting', { detail: false }))
+    }
+    return {
+      enabled: !result.disabled,
+      message: result.warning ?? (result.disabled ? '桌面通知已关闭。' : '关闭桌面通知失败。'),
+    }
   }
 
   const clearUnread = (threadId: string) => {
@@ -98,6 +94,10 @@ export const useNotificationCenter = () => {
   return {
     store,
     permission,
+    pushBusy,
+    pushError,
+    pushSupport,
+    refreshPushSupport,
     requestDesktopPermission,
     setDesktopEnabled,
     clearUnread,
@@ -110,6 +110,11 @@ export const useNotificationService = () => {
   const store = useNotificationStore()
   const { streamNotifications } = useNotificationApi()
   const { refreshUserInfo } = useAuthSession()
+  const {
+    refreshRegistration,
+    subscribeForeground,
+    support: pushSupport,
+  } = useFirebasePush()
   const tabId = crypto.randomUUID()
   const reconnectDuration = shallowRef(3000)
   const reconnectBaseDuration = shallowRef(3000)
@@ -123,6 +128,8 @@ export const useNotificationService = () => {
   let initialCatchup = false
   let reconnectAttempt = 0
   let reconnectResolve: (() => void) | null = null
+  let foregroundUnsubscribe: (() => void) | null = null
+  let pushStartVersion = 0
 
   const reconnectTimer = useTimer(() => {
     reconnectResolve?.()
@@ -157,20 +164,6 @@ export const useNotificationService = () => {
     if (broadcast) post({ type: 'unread', unread })
   }
 
-  const showSystemNotification = (notification: NotificationData) => {
-    if (!store.desktopEnabled || !('Notification' in window) || window.Notification.permission !== 'granted') return
-    const systemNotification = new window.Notification(SOURCE_TITLES[notification.source], {
-      body: notification.preview || '有一条新消息',
-      icon: '/favicon.ico',
-      tag: `chat-message:${notification.thread_id}`,
-    })
-    systemNotification.onclick = () => {
-      window.focus()
-      systemNotification.close()
-      void navigateTo({ path: '/chatbox', query: { thread: notification.thread_id } })
-    }
-  }
-
   const publishNotification = (notification: NotificationData) => {
     store.publishNotification(notification)
     post({ type: 'notification', notification })
@@ -203,8 +196,6 @@ export const useNotificationService = () => {
         if (visibleTab) {
           if (visibleTab.tabId === tabId) store.enqueueSnackbar(notification)
           else post({ type: 'snackbar', tabId: visibleTab.tabId, notification })
-        } else {
-          showSystemNotification(notification)
         }
       }
     }
@@ -297,6 +288,42 @@ export const useNotificationService = () => {
     tryFallbackLeadership()
   }, { duration: 5000, repeat: true })
 
+  const stopPushMessaging = () => {
+    pushStartVersion += 1
+    foregroundUnsubscribe?.()
+    foregroundUnsubscribe = null
+  }
+
+  const startPushMessaging = async () => {
+    stopPushMessaging()
+    const startVersion = pushStartVersion
+    const userId = currentUserId
+    if (userId === null
+      || !store.desktopEnabled
+      || !('Notification' in window)
+      || window.Notification.permission !== 'granted') return
+
+    try {
+      if (!(await refreshRegistration())) {
+        if (pushSupport.value === 'unconfigured' || pushSupport.value === 'unsupported') {
+          store.setDesktopEnabled(false)
+          post({ type: 'desktop-setting', enabled: false })
+        }
+        return
+      }
+      if (pushStartVersion !== startVersion || currentUserId !== userId || !store.desktopEnabled) return
+
+      const unsubscribe = await subscribeForeground((signal) => {
+        if (currentUserId !== userId || !isNewerEventId(signal.eventId, store.lastEventId)) return
+        store.publishPushSignal(signal)
+      })
+      if (pushStartVersion !== startVersion) unsubscribe?.()
+      else foregroundUnsubscribe = unsubscribe
+    } catch (error) {
+      console.warn('[notifications] foreground push setup failed', error)
+    }
+  }
+
   const handleChannelMessage = (event: MessageEvent<ChannelMessage>) => {
     const message = event.data
     if (message.type === 'presence') peers.set(message.presence.tabId, message.presence)
@@ -306,7 +333,11 @@ export const useNotificationService = () => {
     else if (message.type === 'unread') updateUnread(message.unread, false)
     else if (message.type === 'read') store.clearUnread(message.threadId)
     else if (message.type === 'snackbar' && message.tabId === tabId) store.enqueueSnackbar(message.notification)
-    else if (message.type === 'desktop-setting') store.setDesktopEnabled(message.enabled)
+    else if (message.type === 'desktop-setting') {
+      store.setDesktopEnabled(message.enabled)
+      if (message.enabled) void startPushMessaging()
+      else stopPushMessaging()
+    }
     else if (message.type === 'auth-invalid') serviceController?.abort()
   }
 
@@ -320,6 +351,7 @@ export const useNotificationService = () => {
     reconnectTimer.stop()
     presenceTimer.stop()
     leaseTimer.stop()
+    stopPushMessaging()
     channel?.close()
     channel = null
     peers.clear()
@@ -346,6 +378,7 @@ export const useNotificationService = () => {
     channel.addEventListener('message', handleChannelMessage)
     announcePresence()
     presenceTimer.start()
+    if (store.desktopEnabled) void startPushMessaging()
 
     if ('locks' in navigator) {
       void navigator.locks.request(`notification-sse:${userId}`, {
@@ -380,6 +413,8 @@ export const useNotificationService = () => {
   const onDesktopSetting = (event: Event) => {
     const enabled = (event as CustomEvent<boolean>).detail
     post({ type: 'desktop-setting', enabled })
+    if (enabled) void startPushMessaging()
+    else stopPushMessaging()
   }
 
   onMounted(() => {

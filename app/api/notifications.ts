@@ -1,4 +1,4 @@
-import { ApiError, getToken } from './http'
+import { ApiError, getToken, unwrap, useHttp, type Envelope } from './http'
 
 export type NotificationSource = 'chat' | 'reminder' | 'proactive' | 'journal'
 
@@ -16,6 +16,19 @@ export interface NotificationData {
 
 export interface NotificationPingData {
   last_event_id: string
+}
+
+export interface RegisterNotificationInstallationReq {
+  registrationId: string
+  registrationKind: 'token'
+}
+
+export interface UnregisterNotificationInstallationReq {
+  registrationId: string
+}
+
+export interface NotificationInstallationDTO {
+  registered: boolean
 }
 
 export interface NotificationStreamHandlers {
@@ -91,6 +104,7 @@ const parseJson = (data: string, label: string): unknown => {
 }
 
 export const useNotificationApi = () => {
+  const { $api } = useHttp()
   const runtimeConfig = useRuntimeConfig()
   const baseURL = runtimeConfig.public.apiUrl ?? ''
 
@@ -219,5 +233,31 @@ export const useNotificationApi = () => {
     }
   }
 
-  return { streamNotifications }
+  const registerInstallation = async (
+    request: RegisterNotificationInstallationReq,
+  ): Promise<NotificationInstallationDTO> => {
+    const response = await $api<NotificationInstallationDTO | Envelope<NotificationInstallationDTO>>(
+      '/notifications/installations',
+      {
+        method: 'POST',
+        body: request,
+      },
+    )
+    return unwrap(response)
+  }
+
+  const unregisterInstallation = async (
+    request: UnregisterNotificationInstallationReq,
+  ): Promise<NotificationInstallationDTO> => {
+    const response = await $api<NotificationInstallationDTO | Envelope<NotificationInstallationDTO>>(
+      '/notifications/installations',
+      {
+        method: 'DELETE',
+        body: request,
+      },
+    )
+    return unwrap(response)
+  }
+
+  return { registerInstallation, streamNotifications, unregisterInstallation }
 }

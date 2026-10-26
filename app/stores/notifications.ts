@@ -6,6 +6,12 @@ interface SnackbarItem {
   notification: NotificationData
 }
 
+export interface PushRefreshSignal {
+  agentId: string
+  eventId: string
+  threadId: string
+}
+
 const storageKey = (name: string, userId: number) => `notification:${name}:${userId}`
 
 const parseUnread = (value: string | null): Record<string, number> => {
@@ -30,6 +36,8 @@ export const useNotificationStore = defineStore('notifications', {
     desktopEnabled: false,
     latestNotification: null as NotificationData | null,
     notificationRevision: 0,
+    latestPushSignal: null as PushRefreshSignal | null,
+    pushRevision: 0,
     snackbarQueue: [] as SnackbarItem[],
     activeSnackbar: null as SnackbarItem | null,
   }),
@@ -45,6 +53,8 @@ export const useNotificationStore = defineStore('notifications', {
       this.desktopEnabled = window.localStorage.getItem(storageKey('desktop-enabled', userId)) === '1'
       this.latestNotification = null
       this.notificationRevision = 0
+      this.latestPushSignal = null
+      this.pushRevision = 0
       this.snackbarQueue = []
       this.activeSnackbar = null
     },
@@ -57,6 +67,8 @@ export const useNotificationStore = defineStore('notifications', {
       this.desktopEnabled = false
       this.latestNotification = null
       this.notificationRevision = 0
+      this.latestPushSignal = null
+      this.pushRevision = 0
       this.snackbarQueue = []
       this.activeSnackbar = null
     },
@@ -76,6 +88,11 @@ export const useNotificationStore = defineStore('notifications', {
     publishNotification(notification: NotificationData) {
       this.latestNotification = notification
       this.notificationRevision += 1
+    },
+
+    publishPushSignal(signal: PushRefreshSignal) {
+      this.latestPushSignal = signal
+      this.pushRevision += 1
     },
 
     setUnread(unread: Record<string, number>) {

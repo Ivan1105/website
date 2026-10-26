@@ -53,6 +53,12 @@ yarn install
 yarn dev
 ```
 
+### Firebase Web Push
+
+Copy `.env.example` to `.env` and provide the public Firebase Web App config plus the Web Push VAPID public key. The production site must be served over HTTPS so the root-scope Service Worker can receive background messages.
+
+Never place Firebase service-account credentials or `GOOGLE_APPLICATION_CREDENTIALS` in frontend environment variables.
+
 ## 🏗️ Build
 
 ```bash

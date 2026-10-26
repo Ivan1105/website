@@ -61,6 +61,17 @@
         <v-btn icon="mdi-close" variant="text" aria-label="关闭提醒" @click="notificationStore.dismissSnackbar()" />
       </template>
     </v-snackbar>
+    <v-snackbar
+      :model-value="appStore.notice !== null"
+      location="bottom center"
+      :timeout="7000"
+      @update:model-value="open => { if (!open) appStore.setNotice(null) }"
+    >
+      {{ appStore.notice }}
+      <template #actions>
+        <v-btn variant="text" @click="appStore.setNotice(null)">关闭</v-btn>
+      </template>
+    </v-snackbar>
   </v-app>
 </template>
 

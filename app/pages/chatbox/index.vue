@@ -1189,7 +1189,9 @@ const loadConversations = async () => {
   try {
     conversations.value = await chatApi.getConversations()
     const requestedThread = typeof route.query.thread === 'string' ? route.query.thread : ''
+    const requestedAgent = typeof route.query.agent === 'string' ? route.query.agent : ''
     const requestedConversation = conversations.value.find(conversation => conversation.thread_id === requestedThread)
+      ?? conversations.value.find(conversation => String(conversation.id) === requestedAgent)
     currentConversationId.value = requestedConversation?.name ?? conversations.value[0]?.name ?? ''
   } catch (error) {
     conversations.value = []
@@ -1482,7 +1484,13 @@ const selectConversation = async (id: string) => {
   await loadMessages()
   const threadId = currentConversation.value?.thread_id
   if (threadId && route.query.thread !== threadId) {
-    await router.replace({ query: { ...route.query, thread: threadId } })
+    await router.replace({
+      query: {
+        ...route.query,
+        agent: String(currentConversation.value?.id ?? ''),
+        thread: threadId,
+      },
+    })
   }
 }
 
@@ -1526,6 +1534,13 @@ watch(() => notificationStore.notificationRevision, () => {
   }
 })
 
+watch(() => notificationStore.pushRevision, () => {
+  const threadId = notificationStore.latestPushSignal?.threadId
+  if (threadId && threadId === currentConversation.value?.thread_id) {
+    void refreshCurrentThreadFromNotification(threadId)
+  }
+})
+
 watch([loading, sending, activeRunId], ([isLoading, isSending, runId]) => {
   if (isLoading || isSending || runId || !pendingNotificationRefresh) return
   const threadId = pendingNotificationRefresh
@@ -1533,9 +1548,10 @@ watch([loading, sending, activeRunId], ([isLoading, isSending, runId]) => {
   void refreshCurrentThreadFromNotification(threadId)
 })
 
-watch(() => route.query.thread, async (value) => {
-  if (typeof value !== 'string' || conversationsLoading.value) return
-  const conversation = conversations.value.find(item => item.thread_id === value)
+watch([() => route.query.thread, () => route.query.agent], async ([thread, agent]) => {
+  if (conversationsLoading.value) return
+  const conversation = conversations.value.find(item => typeof thread === 'string' && item.thread_id === thread)
+    ?? conversations.value.find(item => typeof agent === 'string' && String(item.id) === agent)
   if (!conversation || conversation.name === currentConversationId.value) return
   stopActiveStream()
   currentConversationId.value = conversation.name

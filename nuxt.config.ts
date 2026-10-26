@@ -89,6 +89,15 @@ export default defineNuxtConfig({
       // 会被 NUXT_PUBLIC_API_BASE 环境变量自动覆盖
       apiUrl: '',
       ossUrl: '',
+      firebase: {
+        apiKey: '',
+        authDomain: '',
+        projectId: '',
+        storageBucket: '',
+        messagingSenderId: '',
+        appId: '',
+        vapidKey: '',
+      },
     },
   },
 })

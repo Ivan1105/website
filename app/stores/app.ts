@@ -29,6 +29,7 @@ export const useAppStore = defineStore('app', {
     authInitialized: false,
     userInfoLoading: false,
     userInfoError: null as string | null,
+    notice: null as string | null,
   }),
   getters: {
     isLoggedIn: (state): boolean => !!state.token,
@@ -86,6 +87,10 @@ export const useAppStore = defineStore('app', {
 
     setUserInfoError(message: string | null) {
       this.userInfoError = message
+    },
+
+    setNotice(message: string | null) {
+      this.notice = message
     },
 
     clearAuth() {
