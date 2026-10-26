@@ -198,6 +198,7 @@
           :disabled="serviceConnectionsBusy" @update:model-value="requestServiceConnectionTab">
           <v-tab value="oauth" prepend-icon="mdi-apps">应用授权</v-tab>
           <v-tab value="email" prepend-icon="mdi-email-outline">邮箱连接</v-tab>
+          <v-tab value="outlook" prepend-icon="mdi-email-fast-outline">Outlook 邮件</v-tab>
         </v-tabs>
         <v-divider />
         <v-card-text class="email-config-content">
@@ -354,7 +355,7 @@
             </div>
           </div>
 
-          <div v-else class="email-config-shell">
+          <div v-else-if="serviceConnectionTab === 'oauth'" class="email-config-shell">
             <header class="email-config-intro">
               <span class="email-config-icon" aria-hidden="true">
                 <v-icon icon="mdi-connection" color="secondary" size="38" />
@@ -440,6 +441,104 @@
               </article>
             </div>
           </div>
+
+          <div v-else class="email-config-shell">
+            <header class="email-config-intro">
+              <span class="email-config-icon" aria-hidden="true">
+                <v-icon icon="mdi-email-fast-outline" color="secondary" size="38" />
+              </span>
+              <div>
+                <p class="eyebrow">OUTLOOK NOTIFICATIONS</p>
+                <h2>Outlook 新邮件通知</h2>
+                <p>收到 Inbox 新邮件时，唤醒绑定的 Agent，并通过现有通知渠道提醒你。</p>
+              </div>
+            </header>
+
+            <div v-if="outlookSubscriptionLoading" class="email-config-state" role="status">
+              <v-progress-circular indeterminate color="secondary" size="30" width="2" />
+              <p>正在读取 Outlook 订阅状态…</p>
+            </div>
+
+            <div v-else-if="outlookSubscriptionLoadError" class="email-config-state" role="alert">
+              <v-icon icon="mdi-alert-circle-outline" color="error" size="32" />
+              <h3>暂时无法读取订阅状态</h3>
+              <p>{{ outlookSubscriptionLoadError }}</p>
+              <v-btn color="secondary" variant="tonal" prepend-icon="mdi-refresh"
+                @click="loadOutlookSubscription">
+                重新加载
+              </v-btn>
+            </div>
+
+            <div v-else class="outlook-subscription-panel">
+              <v-alert v-if="!outlookAuthorized || outlookNeedsReauthorization" type="warning" variant="tonal"
+                density="comfortable" class="outlook-subscription-alert">
+                <template #title>需要授权 Outlook</template>
+                请先完成或更新 Outlook 授权，才能开启新邮件通知。
+                <template #append>
+                  <v-btn variant="text" color="warning" :disabled="outlookSubscriptionUpdating"
+                    @click="goToOutlookAuthorization">
+                    前往应用授权
+                  </v-btn>
+                </template>
+              </v-alert>
+
+              <v-alert v-if="outlookSubscriptionActionError" type="error" variant="tonal" density="comfortable"
+                class="outlook-subscription-alert" role="alert">
+                {{ outlookSubscriptionActionError }}
+              </v-alert>
+
+              <v-alert v-if="outlookSubscription?.status === 'error'" type="error" variant="tonal"
+                density="comfortable" class="outlook-subscription-alert">
+                Outlook 订阅当前异常。你可以稍后重试，或重新授权 Outlook 后再次开启。
+              </v-alert>
+
+              <section class="outlook-subscription-card" aria-label="Outlook 新邮件通知设置">
+                <div class="outlook-subscription-heading">
+                  <div>
+                    <div class="outlook-subscription-title">
+                      <h3>接收新邮件通知</h3>
+                      <v-chip :color="outlookStatusPresentation.color" variant="tonal" size="small"
+                        :prepend-icon="outlookStatusPresentation.icon">
+                        {{ outlookStatusPresentation.label }}
+                      </v-chip>
+                    </div>
+                    <p>仅监听 Outlook Inbox 中新建的邮件，不会更改或删除邮件。</p>
+                  </div>
+                  <v-switch :model-value="outlookSubscription?.enabled ?? false" color="secondary"
+                    hide-details inset :loading="outlookSubscriptionUpdating"
+                    :disabled="outlookSubscriptionToggleDisabled" aria-label="接收 Outlook 新邮件通知"
+                    @update:model-value="updateOutlookSubscription" />
+                </div>
+
+                <v-divider />
+
+                <dl class="outlook-subscription-meta">
+                  <div>
+                    <dt>Outlook 授权</dt>
+                    <dd>
+                      <v-icon :icon="outlookAuthorized ? 'mdi-check-circle-outline' : 'mdi-link-off'"
+                        :color="outlookAuthorized ? 'success' : 'warning'" size="18" />
+                      {{ outlookAuthorized ? '已连接' : '未连接或授权已失效' }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>绑定 Agent</dt>
+                    <dd>{{ outlookSubscription?.agentId || currentConversation?.display_name || '当前 Agent' }}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <v-alert v-if="!outlookSubscription?.enabled && !currentConversation?.thread_id" type="info"
+                variant="tonal" density="comfortable" class="outlook-subscription-alert">
+                开启前，请先返回聊天并向当前 Agent 发送一条消息以创建会话。
+              </v-alert>
+
+              <p v-if="outlookSubscription?.enabled && outlookSubscription.agentId !== currentConversation?.name"
+                class="outlook-subscription-note">
+                当前订阅绑定到 {{ outlookSubscription.agentId }}。如需绑定当前 Agent，请先关闭订阅，再从目标 Agent 的设置中重新开启。
+              </p>
+            </div>
+          </div>
         </v-card-text>
       </v-card>
     </v-dialog>
@@ -478,7 +577,7 @@
 </template>
 
 <script setup lang="ts">
-import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type MailEndpointDTO, type MessageDTO, type OAuthServiceDTO, type UpdateImapConfigReq } from '@/api'
+import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type MailAccountDTO, type MailEndpointDTO, type MessageDTO, type OAuthServiceDTO, type OutlookSubscriptionData, type OutlookSubscriptionStatus, type UpdateImapConfigReq } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
 import { useDisplay } from 'vuetify'
@@ -499,7 +598,12 @@ const { assetUrl } = useAssetUrl()
 type ToolCallStatus = 'running' | 'success' | 'error'
 type MailField = 'displayName' | 'endpoint' | 'username' | 'password'
 type MailEditorMode = 'none' | 'create' | 'edit'
-type ServiceConnectionTab = 'oauth' | 'email'
+type ServiceConnectionTab = 'oauth' | 'email' | 'outlook'
+interface OutlookStatusPresentation {
+  label: string
+  color: 'success' | 'secondary' | 'warning' | 'error' | undefined
+  icon: string
+}
 interface MailConfigForm {
   displayName: string
   endpointKey: string
@@ -568,6 +672,12 @@ const oauthRevokingAppKey = ref<string | null>(null)
 const oauthRevokeDialogOpen = ref(false)
 const oauthRevokeTarget = ref<OAuthServiceDTO | null>(null)
 const oauthRefreshOnFocus = ref(false)
+const outlookAccount = ref<MailAccountDTO | null>(null)
+const outlookSubscription = ref<OutlookSubscriptionData | null>(null)
+const outlookSubscriptionLoading = ref(false)
+const outlookSubscriptionUpdating = ref(false)
+const outlookSubscriptionLoadError = ref('')
+const outlookSubscriptionActionError = ref('')
 const mailConfigs = ref<ImapConfigDTO[]>([])
 const selectedMailConfigId = ref<number | null>(null)
 const mailEditorMode = ref<MailEditorMode>('none')
@@ -680,7 +790,28 @@ const mailConfigUpdatedAt = computed(() => {
 })
 const busy = computed(() => authRequired.value || sending.value || creatingThread.value || loading.value || conversationsLoading.value)
 const oauthActionPending = computed(() => oauthAuthorizingAppKey.value !== null || oauthRevokingAppKey.value !== null)
-const serviceConnectionsBusy = computed(() => mailConfigBusy.value || oauthActionPending.value)
+const outlookAuthorized = computed(() => outlookAccount.value?.status === 'available')
+const outlookNeedsReauthorization = computed(() => outlookSubscription.value?.status === 'reauthorization_required')
+const outlookStatusPresentation = computed<OutlookStatusPresentation>(() => {
+  const presentations: Record<OutlookSubscriptionStatus, OutlookStatusPresentation> = {
+    active: { label: '已开启', color: 'success', icon: 'mdi-check-circle-outline' },
+    creating: { label: '开启中', color: 'secondary', icon: 'mdi-progress-clock' },
+    renewing: { label: '续订中', color: 'secondary', icon: 'mdi-sync' },
+    reauthorization_required: { label: '需要重新授权', color: 'warning', icon: 'mdi-alert-outline' },
+    deleting: { label: '已关闭', color: undefined, icon: 'mdi-bell-off-outline' },
+    disabled: { label: '已关闭', color: undefined, icon: 'mdi-bell-off-outline' },
+    error: { label: '订阅异常', color: 'error', icon: 'mdi-alert-circle-outline' },
+  }
+  return outlookSubscription.value
+    ? presentations[outlookSubscription.value.status]
+    : presentations.disabled
+})
+const outlookSubscriptionToggleDisabled = computed(() => {
+  if (outlookSubscriptionUpdating.value || !outlookSubscription.value) return true
+  if (outlookSubscription.value.enabled) return false
+  return !outlookAuthorized.value || outlookNeedsReauthorization.value || !currentConversation.value?.thread_id
+})
+const serviceConnectionsBusy = computed(() => mailConfigBusy.value || oauthActionPending.value || outlookSubscriptionUpdating.value)
 const conversationSelectionDisabled = computed(() => authRequired.value || creatingThread.value || loading.value || conversationsLoading.value)
 const historyLoaderLabel = computed(() => `加载更早的消息，当前已显示 ${currentMessages.value.length} 条，共 ${messagesTotal.value} 条`)
 const MESSAGES_PAGE_SIZE = 20
@@ -688,6 +819,7 @@ let messagesLoadVersion = 0
 let streamVersion = 0
 let mailConfigLoadVersion = 0
 let oauthServicesLoadVersion = 0
+let outlookSubscriptionLoadVersion = 0
 let pendingMailAction: (() => void) | null = null
 let streamAbortController: AbortController | null = null
 let pendingNotificationRefresh: string | null = null
@@ -963,6 +1095,73 @@ const loadOAuthServices = async () => {
   } finally {
     if (loadVersion === oauthServicesLoadVersion) oauthServicesLoading.value = false
   }
+}
+
+const loadOutlookSubscription = async () => {
+  const loadVersion = ++outlookSubscriptionLoadVersion
+  outlookSubscriptionLoading.value = true
+  outlookSubscriptionLoadError.value = ''
+  outlookSubscriptionActionError.value = ''
+  outlookAccount.value = null
+  outlookSubscription.value = null
+
+  try {
+    const [accounts, subscription] = await Promise.all([
+      mailApi.getAccounts(),
+      mailApi.getOutlookSubscription(),
+    ])
+    if (loadVersion !== outlookSubscriptionLoadVersion
+      || !serviceConnectionsDialogOpen.value
+      || serviceConnectionTab.value !== 'outlook') return
+    outlookAccount.value = accounts.find(account => account.id === 'oauth:outlook') ?? null
+    outlookSubscription.value = subscription
+  } catch (error) {
+    if (loadVersion !== outlookSubscriptionLoadVersion) return
+    if (handleUnauthorized(error)) {
+      performCloseServiceConnectionsDialog()
+      return
+    }
+    outlookSubscriptionLoadError.value = isApiError(error)
+      ? error.message
+      : 'Outlook 订阅状态加载失败，请稍后重试。'
+  } finally {
+    if (loadVersion === outlookSubscriptionLoadVersion) outlookSubscriptionLoading.value = false
+  }
+}
+
+const updateOutlookSubscription = async (enabled: boolean | null) => {
+  const subscription = outlookSubscription.value
+  const conversation = currentConversation.value
+  if (enabled === null || !subscription || outlookSubscriptionUpdating.value || enabled === subscription.enabled) return
+  if (enabled && (!conversation?.thread_id || !outlookAuthorized.value || outlookNeedsReauthorization.value)) return
+
+  outlookSubscriptionUpdating.value = true
+  outlookSubscriptionActionError.value = ''
+  try {
+    if (enabled && conversation) {
+      outlookSubscription.value = await mailApi.setOutlookSubscription({ enabled: true, agentId: conversation.name })
+    } else {
+      outlookSubscription.value = await mailApi.setOutlookSubscription({ enabled: false })
+    }
+  } catch (error) {
+    if (handleUnauthorized(error)) {
+      performCloseServiceConnectionsDialog()
+      return
+    }
+    if (isApiError(error) && error.status === 409 && error.message.includes('Outlook')) {
+      if (outlookAccount.value) outlookAccount.value.status = 'authorization_required'
+    }
+    outlookSubscriptionActionError.value = isApiError(error)
+      ? error.message
+      : `${enabled ? '开启' : '关闭'} Outlook 新邮件通知失败，请稍后重试。`
+  } finally {
+    outlookSubscriptionUpdating.value = false
+  }
+}
+
+const goToOutlookAuthorization = () => {
+  if (outlookSubscriptionUpdating.value) return
+  activateServiceConnectionTab('oauth')
 }
 
 const parseAuthorizationUrl = (value: string) => {
@@ -1601,6 +1800,7 @@ const openClearContextDialog = () => {
 const resetServiceConnectionsState = () => {
   mailConfigLoadVersion += 1
   oauthServicesLoadVersion += 1
+  outlookSubscriptionLoadVersion += 1
   mailDiscardDialogOpen.value = false
   pendingMailAction = null
   mailConfigLoading.value = false
@@ -1616,6 +1816,12 @@ const resetServiceConnectionsState = () => {
   oauthServicesLoading.value = false
   oauthServicesError.value = ''
   oauthServices.value = []
+  outlookAccount.value = null
+  outlookSubscription.value = null
+  outlookSubscriptionLoading.value = false
+  outlookSubscriptionUpdating.value = false
+  outlookSubscriptionLoadError.value = ''
+  outlookSubscriptionActionError.value = ''
 }
 
 const openServiceConnectionsDialog = () => {
@@ -1629,13 +1835,22 @@ const openServiceConnectionsDialog = () => {
 const activateServiceConnectionTab = (tab: ServiceConnectionTab) => {
   mailConfigLoadVersion += 1
   oauthServicesLoadVersion += 1
+  outlookSubscriptionLoadVersion += 1
   mailConfigLoading.value = false
   oauthServicesLoading.value = false
+  outlookSubscriptionLoading.value = false
   serviceConnectionTab.value = tab
 
   if (tab === 'email') {
     resetMailEditor()
     void loadMailConfig()
+    return
+  }
+
+  if (tab === 'outlook') {
+    resetMailEditor()
+    oauthRefreshOnFocus.value = false
+    void loadOutlookSubscription()
     return
   }
 
@@ -1648,7 +1863,7 @@ const activateServiceConnectionTab = (tab: ServiceConnectionTab) => {
 }
 
 const requestServiceConnectionTab = (value: unknown) => {
-  if ((value !== 'oauth' && value !== 'email')
+  if ((value !== 'oauth' && value !== 'email' && value !== 'outlook')
     || value === serviceConnectionTab.value
     || serviceConnectionsBusy.value) return
 
@@ -2163,6 +2378,91 @@ onBeforeUnmount(() => {
 
 .oauth-service-action {
   min-width: 108px;
+}
+
+.outlook-subscription-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.outlook-subscription-alert {
+  line-height: 1.65;
+}
+
+.outlook-subscription-card {
+  overflow: hidden;
+  border: 1px solid var(--site-border);
+  border-radius: 12px;
+  background: var(--site-surface);
+}
+
+.outlook-subscription-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px;
+}
+
+.outlook-subscription-heading > div {
+  min-width: 0;
+}
+
+.outlook-subscription-heading > .v-switch {
+  flex: 0 0 auto;
+}
+
+.outlook-subscription-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.outlook-subscription-title h3 {
+  font-size: 1.05rem;
+}
+
+.outlook-subscription-heading p,
+.outlook-subscription-note {
+  color: var(--site-muted);
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.outlook-subscription-heading p {
+  margin-top: 8px;
+}
+
+.outlook-subscription-meta {
+  display: grid;
+  gap: 14px;
+  padding: 20px 24px;
+}
+
+.outlook-subscription-meta > div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.outlook-subscription-meta dt {
+  color: var(--site-muted);
+  font-size: 0.78rem;
+}
+
+.outlook-subscription-meta dd {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.outlook-subscription-note {
+  padding-inline: 4px;
 }
 
 .email-config-form {
@@ -2729,6 +3029,18 @@ onBeforeUnmount(() => {
   }
   .oauth-service-action {
     width: 100%;
+  }
+  .outlook-subscription-heading {
+    align-items: flex-start;
+    gap: 12px;
+    padding: 18px 16px;
+  }
+  .outlook-subscription-meta {
+    padding: 18px 16px;
+  }
+  .outlook-subscription-meta > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
   }
   .email-config-actions .v-btn:last-child {
     flex: 1;

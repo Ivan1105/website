@@ -40,6 +40,42 @@ export interface MailTestResultDTO {
   connected: boolean
 }
 
+export type MailAccountKind = 'oauth' | 'imap'
+export type MailAccountProvider = 'outlook' | 'google' | 'imap'
+export type MailAccountStatus = 'available' | 'authorization_required'
+
+export interface MailAccountDTO {
+  id: string
+  kind: MailAccountKind
+  provider: MailAccountProvider
+  displayName: string
+  status: MailAccountStatus
+  oauthAppKey: string | null
+}
+
+export type OutlookSubscriptionStatus =
+  | 'creating'
+  | 'active'
+  | 'renewing'
+  | 'reauthorization_required'
+  | 'deleting'
+  | 'disabled'
+  | 'error'
+
+export interface OutlookSubscriptionData {
+  accountId: 'oauth:outlook'
+  provider: 'outlook'
+  enabled: boolean
+  status: OutlookSubscriptionStatus
+  agentId: string | null
+  expiresAt: string | null
+  nextRenewAt: string | null
+}
+
+export type SetOutlookSubscriptionInput =
+  | { enabled: true, agentId: string }
+  | { enabled: false }
+
 export const useMailApi = () => {
   const { $api } = useHttp()
 
@@ -47,6 +83,28 @@ export const useMailApi = () => {
     async getEndpoints(): Promise<MailEndpointDTO[]> {
       const resp = await $api<MailEndpointDTO[] | Envelope<MailEndpointDTO[]>>('/mail/endpoints', {
         method: 'GET',
+      })
+      return unwrap(resp)
+    },
+
+    async getAccounts(): Promise<MailAccountDTO[]> {
+      const resp = await $api<MailAccountDTO[] | Envelope<MailAccountDTO[]>>('/mail/accounts', {
+        method: 'GET',
+      })
+      return unwrap(resp)
+    },
+
+    async getOutlookSubscription(): Promise<OutlookSubscriptionData> {
+      const resp = await $api<OutlookSubscriptionData | Envelope<OutlookSubscriptionData>>('/mail/outlook/subscription', {
+        method: 'GET',
+      })
+      return unwrap(resp)
+    },
+
+    async setOutlookSubscription(input: SetOutlookSubscriptionInput): Promise<OutlookSubscriptionData> {
+      const resp = await $api<OutlookSubscriptionData | Envelope<OutlookSubscriptionData>>('/mail/outlook/subscription', {
+        method: 'POST',
+        body: input,
       })
       return unwrap(resp)
     },
