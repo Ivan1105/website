@@ -43,6 +43,8 @@ export { useMailApi } from './mail'
 export type {
   CreateImapConfigReq,
   ImapConfigDTO,
+  ImapSubscriptionData,
+  ImapSubscriptionStatus,
   MailAccountDTO,
   MailAccountKind,
   MailAccountProvider,
@@ -51,6 +53,7 @@ export type {
   MailTestResultDTO,
   OutlookSubscriptionData,
   OutlookSubscriptionStatus,
+  SetImapSubscriptionInput,
   SetOutlookSubscriptionInput,
   UpdateImapConfigReq,
 } from './mail'

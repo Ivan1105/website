@@ -76,6 +76,26 @@ export type SetOutlookSubscriptionInput =
   | { enabled: true, agentId: string }
   | { enabled: false }
 
+export type ImapSubscriptionStatus =
+  | 'active'
+  | 'disabled'
+  | 'error'
+  | 'reauthorization_required'
+
+export interface ImapSubscriptionData {
+  accountId: `imap:${number}`
+  provider: 'imap'
+  enabled: boolean
+  status: ImapSubscriptionStatus
+  agentId: string | null
+  lastPolledAt: string | null
+  pollIntervalMinutes: number
+}
+
+export type SetImapSubscriptionInput =
+  | { enabled: true, agentId: string }
+  | { enabled: false }
+
 export const useMailApi = () => {
   const { $api } = useHttp()
 
@@ -106,6 +126,28 @@ export const useMailApi = () => {
         method: 'POST',
         body: input,
       })
+      return unwrap(resp)
+    },
+
+    async getImapSubscription(configId: number): Promise<ImapSubscriptionData> {
+      const resp = await $api<ImapSubscriptionData | Envelope<ImapSubscriptionData>>(
+        `/mail/imap-configs/${encodeURIComponent(configId)}/subscription`,
+        { method: 'GET' },
+      )
+      return unwrap(resp)
+    },
+
+    async setImapSubscription(
+      configId: number,
+      input: SetImapSubscriptionInput,
+    ): Promise<ImapSubscriptionData> {
+      const resp = await $api<ImapSubscriptionData | Envelope<ImapSubscriptionData>>(
+        `/mail/imap-configs/${encodeURIComponent(configId)}/subscription`,
+        {
+          method: 'POST',
+          body: input,
+        },
+      )
       return unwrap(resp)
     },
 
