@@ -54,11 +54,8 @@ export interface MailAccountDTO {
 }
 
 export type OutlookSubscriptionStatus =
-  | 'creating'
   | 'active'
-  | 'renewing'
   | 'reauthorization_required'
-  | 'deleting'
   | 'disabled'
   | 'error'
 
@@ -68,8 +65,8 @@ export interface OutlookSubscriptionData {
   enabled: boolean
   status: OutlookSubscriptionStatus
   agentId: string | null
-  expiresAt: string | null
-  nextRenewAt: string | null
+  lastPolledAt: string | null
+  pollIntervalMinutes: number
 }
 
 export type SetOutlookSubscriptionInput =

@@ -464,7 +464,7 @@
                 <div class="mail-subscription-section-heading">
                   <div>
                     <h3 id="outlook-subscription-heading">Outlook</h3>
-                    <p>通过 Microsoft 授权监听 Inbox 新邮件。</p>
+                    <p>通过 Microsoft 授权每 10 分钟检查一次 Inbox 新邮件。</p>
                   </div>
                 </div>
 
@@ -499,7 +499,7 @@
 
                 <v-alert v-if="outlookSubscription?.status === 'error'" type="error" variant="tonal"
                   density="comfortable" class="outlook-subscription-alert">
-                  Outlook 订阅当前异常。你可以稍后重试，或重新授权 Outlook 后再次开启。
+                  Outlook 邮件检查当前异常。你可以稍后重试，或重新授权 Outlook 后再次开启。
                 </v-alert>
 
                 <article v-if="outlookSubscription" class="outlook-subscription-card"
@@ -513,7 +513,7 @@
                           {{ outlookStatusPresentation.label }}
                         </v-chip>
                       </div>
-                      <p>仅监听 Outlook Inbox 中新建的邮件，不会更改或删除邮件。</p>
+                      <p>每 10 分钟检查 Outlook Inbox 中的新邮件，不会更改或删除邮件。</p>
                     </div>
                     <v-switch :model-value="outlookSubscription.enabled" color="secondary"
                       hide-details inset :loading="outlookSubscriptionUpdating"
@@ -535,6 +535,14 @@
                     <div>
                       <dt>绑定 Agent</dt>
                       <dd>{{ outlookSubscription.agentId || currentConversation?.display_name || '当前 Agent' }}</dd>
+                    </div>
+                    <div>
+                      <dt>最近检查</dt>
+                      <dd>{{ formatSubscriptionTime(outlookSubscription.lastPolledAt) }}</dd>
+                    </div>
+                    <div>
+                      <dt>检查间隔</dt>
+                      <dd>{{ outlookSubscription.pollIntervalMinutes }} 分钟</dd>
                     </div>
                   </dl>
                 </article>
@@ -921,12 +929,9 @@ const outlookNeedsReauthorization = computed(() => outlookSubscription.value?.st
 const outlookStatusPresentation = computed<OutlookStatusPresentation>(() => {
   const presentations: Record<OutlookSubscriptionStatus, OutlookStatusPresentation> = {
     active: { label: '已开启', color: 'success', icon: 'mdi-check-circle-outline' },
-    creating: { label: '开启中', color: 'secondary', icon: 'mdi-progress-clock' },
-    renewing: { label: '续订中', color: 'secondary', icon: 'mdi-sync' },
     reauthorization_required: { label: '需要重新授权', color: 'warning', icon: 'mdi-alert-outline' },
-    deleting: { label: '已关闭', color: undefined, icon: 'mdi-bell-off-outline' },
     disabled: { label: '已关闭', color: undefined, icon: 'mdi-bell-off-outline' },
-    error: { label: '订阅异常', color: 'error', icon: 'mdi-alert-circle-outline' },
+    error: { label: '检查异常', color: 'error', icon: 'mdi-alert-circle-outline' },
   }
   return outlookSubscription.value
     ? presentations[outlookSubscription.value.status]
