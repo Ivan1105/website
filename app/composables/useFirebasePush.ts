@@ -35,7 +35,7 @@ interface DisablePushResult {
 
 const FIREBASE_APP_NAME = 'miku-push'
 const TOKEN_STORAGE_KEY = 'notification:fcm-registration-id'
-const VALID_SOURCES = new Set(['chat', 'proactive', 'reminder', 'journal'])
+const VALID_SOURCES = new Set(['chat', 'proactive', 'reminder', 'journal', 'mail'])
 
 const toConfigString = (value: unknown): string => (
   value === null || value === undefined ? '' : String(value).trim()

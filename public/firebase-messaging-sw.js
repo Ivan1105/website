@@ -42,7 +42,7 @@ const hasConfig = Object.values(firebaseConfig).every(value => typeof value === 
 if (hasConfig) {
   firebase.initializeApp(firebaseConfig)
   const messaging = firebase.messaging()
-  const validSources = new Set(['chat', 'proactive', 'reminder', 'journal'])
+  const validSources = new Set(['chat', 'proactive', 'reminder', 'journal', 'mail'])
 
   messaging.onBackgroundMessage((payload) => {
     const data = payload && payload.data
