@@ -291,7 +291,7 @@
                   <v-select v-model="mailForm.endpointKey" :items="mailEndpointOptions" item-title="title" item-value="key"
                     class="email-endpoint-select" label="邮箱服务器" placeholder="请选择邮箱服务器"
                     prepend-inner-icon="mdi-server-outline" variant="outlined" color="secondary"
-                    no-data-text="暂无可用邮箱服务器" :disabled="mailConfigBusy || !mailEndpoints.length"
+                    no-data-text="noData.mailServers" :disabled="mailConfigBusy || !mailEndpoints.length"
                     :error-messages="mailFieldMessages('endpoint')" @blur="mailTouched.endpoint = true">
                     <template #selection>
                       <span v-if="selectedMailEndpointHost" class="email-endpoint-selection">

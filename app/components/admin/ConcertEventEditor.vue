@@ -1,0 +1,358 @@
+<template>
+  <div class="event-editor">
+    <header class="editor-header">
+      <div><p class="eyebrow">EVENT / 演出场次</p><h2>{{ currentEvent ? '编辑演出场次' : '新增演出场次' }}</h2></div>
+      <v-btn icon="mdi-close" variant="text" aria-label="关闭编辑器" :disabled="saving" @click="$emit('cancel')" />
+    </header>
+
+    <v-alert v-if="error" type="error" variant="tonal" density="comfortable" closable @click:close="error = null">{{ error }}</v-alert>
+    <v-alert v-if="success" type="success" variant="tonal" density="compact" closable @click:close="success = null">{{ success }}</v-alert>
+
+    <v-form class="event-form" @submit.prevent="save">
+      <section class="form-section">
+        <div class="section-heading"><div><p class="eyebrow">BASIC</p><h3>基础信息</h3></div></div>
+        <v-text-field v-model.trim="form.official_name" label="官方场次名称 *" :rules="requiredRules" />
+        <v-text-field v-model.trim="form.slug" label="Slug *" :rules="slugRules" />
+        <div class="form-grid">
+          <v-autocomplete
+            v-model="form.tour_id" label="所属巡演" :items="tourOptions" item-title="name" item-value="id"
+            clearable :loading="optionLoading.tours" no-data-text="noData.tours" @update:search="searchTours"
+          />
+          <v-autocomplete
+            v-model="form.venue_id" label="场地" :items="venueOptions" item-title="name" item-value="id"
+            clearable :loading="optionLoading.venues" no-data-text="noData.venues" @update:search="searchVenues"
+          />
+          <v-select v-model="form.event_type" label="演出类型" :items="eventTypeItems" />
+          <v-text-field v-model.trim="form.city" label="城市" />
+          <v-combobox v-model.trim="form.timezone" label="IANA 时区 *" :items="timezoneSuggestions" :rules="requiredRules" />
+          <v-select v-model="form.status" label="状态" :items="eventStatusItems" />
+          <v-select v-model="form.confidence" label="确认级别" :items="confidenceItems" />
+        </div>
+      </section>
+
+      <section class="form-section">
+        <div class="section-heading"><div><p class="eyebrow">SCHEDULE</p><h3>演出时间</h3></div></div>
+        <div class="form-grid">
+          <v-text-field v-model="form.local_date" label="当地日期" type="date" />
+          <v-text-field v-model="form.local_start_time" label="当地开始时间" type="time" step="60" :disabled="!form.local_date" />
+          <v-text-field v-model="form.local_end_date" label="当地结束日期" type="date" :disabled="!form.local_start_time" />
+          <v-text-field v-model="form.local_end_time" label="当地结束时间" type="time" step="60" :disabled="!form.local_start_time" />
+        </div>
+        <div v-if="timePreview || timeError" class="time-preview" :class="{ 'time-preview-error': timeError }">
+          <v-icon :icon="timeError ? 'mdi-alert-circle-outline' : 'mdi-clock-check-outline'" size="18" />
+          <span>{{ timeError || timePreview }}</span>
+        </div>
+        <v-textarea v-model="form.notes" label="备注" rows="3" auto-grow />
+      </section>
+
+      <template v-if="currentEvent">
+        <section class="form-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">SETLIST</p><h3>歌单</h3><p class="muted">拖动手柄调整顺序，保存时将整单覆盖。</p></div>
+            <div class="section-actions">
+              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-music-note-plus" @click="addSetlistItem">添加歌曲</v-btn>
+              <v-btn variant="text" color="secondary" size="small" @click="$emit('switch-resource', 'songs')">维护歌曲库</v-btn>
+            </div>
+          </div>
+
+          <div v-if="relationsLoading" class="relation-loading"><v-progress-circular indeterminate size="24" width="2" color="primary" /> 正在加载歌单…</div>
+          <div v-else-if="!setlist.length" class="relation-empty">尚未添加歌单。</div>
+          <VueDraggable v-else v-model="setlist" handle=".setlist-drag-handle" :animation="180" class="setlist-list">
+            <article v-for="(item, index) in setlist" :key="item.key" class="setlist-row">
+              <button type="button" class="setlist-drag-handle" :aria-label="`拖动第 ${index + 1} 首歌曲`"><v-icon icon="mdi-drag" /></button>
+              <span class="setlist-position">{{ index + 1 }}</span>
+              <div class="setlist-fields">
+                <v-autocomplete
+                  v-model="item.song_id" label="标准歌曲" :items="songOptions" item-title="title" item-value="id"
+                  density="compact" clearable no-data-text="noData.songs" :loading="optionLoading.songs" @update:search="searchSongs"
+                  @update:model-value="selectSong(item)"
+                />
+                <v-text-field v-model.trim="item.title_as_performed" label="现场名称 *" density="compact" />
+                <v-text-field v-model.trim="item.version_label" label="版本" density="compact" />
+                <v-select v-model="item.confidence" label="确认级别" :items="confidenceItems" density="compact" />
+                <div class="setlist-flags">
+                  <v-checkbox v-model="item.is_encore" label="安可" density="compact" hide-details />
+                  <v-checkbox v-model="item.is_medley" label="组曲" density="compact" hide-details />
+                </div>
+              </div>
+              <div class="setlist-actions">
+                <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="index === 0" :aria-label="`上移第 ${index + 1} 首`" @click="moveSetlist(index, -1)" />
+                <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="index === setlist.length - 1" :aria-label="`下移第 ${index + 1} 首`" @click="moveSetlist(index, 1)" />
+                <v-btn icon="mdi-delete-outline" size="x-small" variant="text" color="error" :aria-label="`删除第 ${index + 1} 首`" @click="setlist.splice(index, 1)" />
+              </div>
+            </article>
+          </VueDraggable>
+        </section>
+
+        <section class="form-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">SOURCES</p><h3>资料来源</h3><p class="muted">记录场次信息和歌单的可追溯来源。</p></div>
+            <div class="section-actions">
+              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-link-plus" @click="addSource">添加来源</v-btn>
+              <v-btn variant="text" color="secondary" size="small" @click="$emit('switch-resource', 'sources')">维护来源库</v-btn>
+            </div>
+          </div>
+          <div v-if="!eventSources.length" class="relation-empty">尚未关联资料来源。</div>
+          <div v-else class="source-list">
+            <article v-for="(item, index) in eventSources" :key="item.key" class="source-row">
+              <v-autocomplete
+                v-model="item.source_id" label="资料来源 *" :items="sourceOptions" item-title="display_title" item-value="id"
+                density="compact" clearable no-data-text="noData.sources" :loading="optionLoading.sources" @update:search="searchSources"
+              />
+              <v-select v-model="item.relation_type" label="关联类型" :items="sourceRelationItems" density="compact" />
+              <v-checkbox v-model="item.is_primary" label="主要来源" density="compact" hide-details />
+              <v-text-field v-model.trim="item.note" label="备注" density="compact" />
+              <v-btn icon="mdi-delete-outline" variant="text" color="error" aria-label="删除来源关联" @click="eventSources.splice(index, 1)" />
+            </article>
+          </div>
+        </section>
+      </template>
+
+      <v-alert v-else type="info" variant="tonal" density="comfortable">
+        请先保存基础信息。创建场次后即可维护歌单和资料来源。
+      </v-alert>
+
+      <footer class="editor-actions">
+        <v-btn variant="text" :disabled="saving" @click="$emit('cancel')">关闭</v-btn>
+        <v-btn type="submit" color="primary" :loading="saving" prepend-icon="mdi-content-save-outline">
+          {{ currentEvent ? '保存全部' : '保存并继续编辑' }}
+        </v-btn>
+      </footer>
+    </v-form>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { VueDraggable } from 'vue-draggable-plus'
+import {
+  isApiError,
+  useConcertAdminApi,
+  type ConcertResource,
+  type EventDTO,
+  type EventInput,
+  type EventSourceInput,
+  type SetlistItemInput,
+  type SongDTO,
+  type SourceDTO,
+  type TourDTO,
+  type VenueDTO,
+} from '@/api'
+import {
+  confidenceLabels, enumItems, eventStatusLabels, eventTypeLabels, sourceRelationLabels,
+  timezoneSuggestions, toLocalDateTimeInput, toNullable, zonedLocalToUtc,
+} from '@/utils/concert-admin'
+
+interface EventFormState {
+  tour_id: number | null; venue_id: number | null; slug: string; official_name: string
+  event_type: EventDTO['event_type']; city: string; timezone: string
+  local_date: string; local_start_time: string; local_end_date: string; local_end_time: string
+  status: EventDTO['status']; confidence: EventDTO['confidence']; notes: string
+}
+interface EditableSetlistItem extends SetlistItemInput { key: string; version_label: string; confidence: EventDTO['confidence']; notes: string; is_encore: boolean; is_medley: boolean }
+interface EditableEventSource extends Omit<EventSourceInput, 'source_id'> { key: string; source_id: number | null; is_primary: boolean; note: string }
+type SourceOption = SourceDTO & { display_title: string }
+
+const props = defineProps<{ record: EventDTO | null }>()
+const emit = defineEmits<{
+  saved: [record: EventDTO]
+  cancel: []
+  'dirty-change': [dirty: boolean]
+  'switch-resource': [resource: Extract<ConcertResource, 'songs' | 'sources'>]
+}>()
+const { concertAdminApi } = useConcertAdminApi()
+const currentEvent = ref<EventDTO | null>(null)
+const form = reactive<EventFormState>(emptyForm())
+const setlist = ref<EditableSetlistItem[]>([])
+const eventSources = ref<EditableEventSource[]>([])
+const tourOptions = ref<TourDTO[]>([])
+const venueOptions = ref<VenueDTO[]>([])
+const songOptions = ref<SongDTO[]>([])
+const sourceOptions = ref<SourceOption[]>([])
+const optionLoading = reactive({ tours: false, venues: false, songs: false, sources: false })
+const relationsLoading = ref(false)
+const saving = ref(false)
+const error = ref<string | null>(null)
+const success = ref<string | null>(null)
+const baseline = ref('')
+const optionRequest = reactive({ tours: 0, venues: 0, songs: 0, sources: 0 })
+
+const eventTypeItems = enumItems(eventTypeLabels)
+const eventStatusItems = enumItems(eventStatusLabels)
+const confidenceItems = enumItems(confidenceLabels)
+const sourceRelationItems = enumItems(sourceRelationLabels)
+const requiredRules = [(value: string) => !!value?.trim() || '此项为必填']
+const slugRules = [...requiredRules, (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) || '只能包含小写字母、数字和连字符']
+
+const timeState = computed(() => {
+  try {
+    if (!form.local_date || !form.local_start_time) return { start: null, end: null, error: null }
+    const start = zonedLocalToUtc(`${form.local_date}T${form.local_start_time.slice(0, 5)}`, form.timezone)
+    let end: string | null = null
+    if (form.local_end_time) {
+      const endDate = form.local_end_date || form.local_date
+      end = zonedLocalToUtc(`${endDate}T${form.local_end_time.slice(0, 5)}`, form.timezone)
+      if (new Date(end) <= new Date(start)) throw new Error('结束时间必须晚于开始时间')
+    }
+    return { start, end, error: null }
+  } catch (caught) {
+    return { start: null, end: null, error: caught instanceof Error ? caught.message : '时间换算失败' }
+  }
+})
+const timeError = computed(() => timeState.value.error)
+const timePreview = computed(() => timeState.value.start
+  ? `UTC：${timeState.value.start}${timeState.value.end ? ` — ${timeState.value.end}` : ''}`
+  : form.local_date ? '已记录当地日期；填写开始时间后将自动换算 UTC。' : '')
+
+watch(() => props.record, reset, { immediate: true })
+watch([form, setlist, eventSources], () => emit('dirty-change', snapshot() !== baseline.value), { deep: true })
+
+async function reset() {
+  currentEvent.value = props.record
+  Object.assign(form, emptyForm())
+  setlist.value = []
+  eventSources.value = []
+  error.value = null
+  success.value = null
+  if (props.record) fillForm(props.record)
+  await Promise.all([loadTours(), loadVenues(), loadSongs(), loadSources()])
+  if (props.record) await loadRelations(props.record.id)
+  markClean()
+}
+
+function emptyForm(): EventFormState {
+  return { tour_id: null, venue_id: null, slug: '', official_name: '', event_type: 'concert', city: '', timezone: 'Asia/Tokyo', local_date: '', local_start_time: '', local_end_date: '', local_end_time: '', status: 'unknown', confidence: 'confirmed', notes: '' }
+}
+
+function fillForm(record: EventDTO) {
+  const startLocal = record.starts_at_utc ? toLocalDateTimeInput(record.starts_at_utc, record.timezone) : ''
+  const endLocal = record.ends_at_utc ? toLocalDateTimeInput(record.ends_at_utc, record.timezone) : ''
+  Object.assign(form, {
+    tour_id: record.tour_id, venue_id: record.venue_id, slug: record.slug, official_name: record.official_name,
+    event_type: record.event_type, city: record.city ?? '', timezone: record.timezone,
+    local_date: startLocal.slice(0, 10) || record.local_date || '',
+    local_start_time: startLocal.slice(11, 16) || record.local_start_time?.slice(0, 5) || '',
+    local_end_date: endLocal.slice(0, 10), local_end_time: endLocal.slice(11, 16),
+    status: record.status, confidence: record.confidence, notes: record.notes ?? '',
+  })
+}
+
+async function loadRelations(id: number) {
+  relationsLoading.value = true
+  try {
+    const [setlistData, sourceData] = await Promise.all([concertAdminApi.getSetlist(id), concertAdminApi.getEventSources(id)])
+    setlist.value = setlistData.map(item => ({
+      key: crypto.randomUUID(), song_id: item.song_id, title_as_performed: item.title_as_performed,
+      version_label: item.version_label ?? '', is_encore: item.is_encore,
+      is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '',
+    }))
+    eventSources.value = sourceData.map(item => ({
+      key: crypto.randomUUID(), source_id: item.source_id, relation_type: item.relation_type,
+      is_primary: item.is_primary, note: item.note ?? '',
+    }))
+    mergeOptions(songOptions, setlistData.flatMap(item => item.song ? [item.song] : []))
+    mergeSourceOptions(sourceData.flatMap(item => item.source ? [item.source] : []))
+  } catch (caught) {
+    error.value = isApiError(caught) ? caught.message : '暂时无法加载歌单和来源。'
+  } finally {
+    relationsLoading.value = false
+  }
+}
+
+async function save() {
+  if (saving.value) return
+  error.value = null
+  success.value = null
+  if (!form.official_name.trim() || !form.slug.trim() || !form.timezone.trim()) { error.value = '请填写所有必填项。'; return }
+  if (timeError.value) { error.value = timeError.value; return }
+  if (setlist.value.some(item => !item.title_as_performed.trim())) { error.value = '歌单中的现场名称不能为空。'; return }
+  if (eventSources.value.some(item => item.source_id === null)) { error.value = '请选择每条关联的资料来源。'; return }
+  if (hasDuplicatePrimarySources()) { error.value = '同一关联类型最多只能有一个主要来源。'; return }
+  saving.value = true
+  try {
+    const input = buildInput()
+    const saved = currentEvent.value
+      ? await concertAdminApi.updateEvent(currentEvent.value.id, input)
+      : await concertAdminApi.createEvent(input)
+    currentEvent.value = saved
+    fillForm(saved)
+    if (props.record || setlist.value.length || eventSources.value.length) {
+      const [savedSetlist, savedSources] = await Promise.all([
+        concertAdminApi.replaceSetlist(saved.id, setlist.value.map(toSetlistInput)),
+        concertAdminApi.replaceEventSources(saved.id, eventSources.value.map(toSourceInput)),
+      ])
+      setlist.value = savedSetlist.map(item => ({ key: crypto.randomUUID(), song_id: item.song_id, title_as_performed: item.title_as_performed, version_label: item.version_label ?? '', is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '' }))
+      eventSources.value = savedSources.map(item => ({ key: crypto.randomUUID(), source_id: item.source_id, relation_type: item.relation_type, is_primary: item.is_primary, note: item.note ?? '' }))
+    }
+    success.value = props.record ? '演出资料已保存。' : '场次已创建，现在可以继续维护歌单和来源。'
+    markClean()
+    emit('saved', saved)
+  } catch (caught) {
+    error.value = isApiError(caught) ? caught.message : caught instanceof Error ? caught.message : '保存失败，请稍后重试。'
+  } finally {
+    saving.value = false
+  }
+}
+
+function buildInput(): EventInput {
+  return {
+    tour_id: form.tour_id, venue_id: form.venue_id, slug: form.slug.trim(), official_name: form.official_name.trim(),
+    event_type: form.event_type, city: toNullable(form.city), timezone: form.timezone.trim(),
+    local_date: form.local_date || null, local_start_time: form.local_start_time ? `${form.local_start_time.slice(0, 5)}:00` : null,
+    starts_at_utc: timeState.value.start, ends_at_utc: timeState.value.end,
+    status: form.status, confidence: form.confidence, notes: toNullable(form.notes),
+  }
+}
+
+function addSetlistItem() { setlist.value.push({ key: crypto.randomUUID(), song_id: null, title_as_performed: '', version_label: '', is_encore: false, is_medley: false, confidence: 'confirmed', notes: '' }) }
+function addSource() { eventSources.value.push({ key: crypto.randomUUID(), source_id: null, relation_type: 'event_info', is_primary: false, note: '' }) }
+function moveSetlist(index: number, delta: number) { const target = index + delta; if (target < 0 || target >= setlist.value.length) return; const [item] = setlist.value.splice(index, 1); if (item) setlist.value.splice(target, 0, item) }
+function selectSong(item: EditableSetlistItem) { const song = songOptions.value.find(option => option.id === item.song_id); if (song && !item.title_as_performed.trim()) item.title_as_performed = song.title }
+function toSetlistInput(item: EditableSetlistItem): SetlistItemInput { return { song_id: item.song_id, title_as_performed: item.title_as_performed.trim(), version_label: toNullable(item.version_label), is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: toNullable(item.notes) } }
+function toSourceInput(item: EditableEventSource): EventSourceInput { return { source_id: item.source_id!, relation_type: item.relation_type, is_primary: item.is_primary, note: toNullable(item.note) } }
+function hasDuplicatePrimarySources() { const types = eventSources.value.filter(item => item.is_primary).map(item => item.relation_type); return new Set(types).size !== types.length }
+
+async function loadTours(q?: string) { await loadOption('tours', () => concertAdminApi.listTours({ page_size: 50, q }), result => mergeOptions(tourOptions, result.items)) }
+async function loadVenues(q?: string) { await loadOption('venues', () => concertAdminApi.listVenues({ page_size: 50, q }), result => mergeOptions(venueOptions, result.items)) }
+async function loadSongs(q?: string) { await loadOption('songs', () => concertAdminApi.listSongs({ page_size: 50, q }), result => mergeOptions(songOptions, result.items)) }
+async function loadSources(q?: string) { await loadOption('sources', () => concertAdminApi.listSources({ page_size: 50, q }), result => mergeSourceOptions(result.items)) }
+function searchTours(value: string) { void loadTours(value?.trim() || undefined) }
+function searchVenues(value: string) { void loadVenues(value?.trim() || undefined) }
+function searchSongs(value: string) { void loadSongs(value?.trim() || undefined) }
+function searchSources(value: string) { void loadSources(value?.trim() || undefined) }
+
+async function loadOption<K extends keyof typeof optionLoading, T>(key: K, operation: () => Promise<T>, apply: (result: T) => void) {
+  const request = ++optionRequest[key]
+  optionLoading[key] = true
+  try { const result = await operation(); if (request === optionRequest[key]) apply(result) } catch { /* 表单仍可继续编辑 */ } finally { if (request === optionRequest[key]) optionLoading[key] = false }
+}
+function mergeOptions<T extends { id: number }>(target: Ref<T[]>, incoming: T[]) { const map = new Map(target.value.map(item => [item.id, item])); incoming.forEach(item => map.set(item.id, item)); target.value = [...map.values()] }
+function mergeSourceOptions(incoming: SourceDTO[]) { mergeOptions(sourceOptions, incoming.map(item => ({ ...item, display_title: item.title || item.publisher || item.url }))) }
+function snapshot() { return JSON.stringify({ form, setlist: setlist.value.map(({ key: _key, ...item }) => item), sources: eventSources.value.map(({ key: _key, ...item }) => item) }) }
+function markClean() { nextTick(() => { baseline.value = snapshot(); emit('dirty-change', false) }) }
+</script>
+
+<style scoped>
+.event-editor { min-height: 100%; display: flex; flex-direction: column; }
+.editor-header { position: sticky; z-index: 3; top: 0; padding: 24px 26px 18px; display: flex; justify-content: space-between; align-items: flex-start; background: rgb(var(--v-theme-surface)); border-bottom: 1px solid var(--site-border); }
+.editor-header h2 { margin: 4px 0 0; font-size: 1.5rem; }
+.event-form { padding: 22px 26px; display: grid; gap: 22px; }
+.form-section { display: grid; gap: 14px; padding-bottom: 22px; border-bottom: 1px solid var(--site-border); }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.section-heading h3 { margin: 3px 0 2px; font-size: 1.12rem; }
+.section-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.time-preview { padding: 10px 12px; border-radius: 11px; display: flex; gap: 8px; color: rgb(var(--v-theme-success)); background: color-mix(in srgb, rgb(var(--v-theme-success)) 10%, transparent); font-size: .82rem; overflow-wrap: anywhere; }
+.time-preview-error { color: rgb(var(--v-theme-error)); background: color-mix(in srgb, rgb(var(--v-theme-error)) 10%, transparent); }
+.relation-loading, .relation-empty { min-height: 72px; padding: 20px; border: 1px dashed var(--site-border); border-radius: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--site-muted); }
+.setlist-list, .source-list { display: grid; gap: 10px; }
+.setlist-row { padding: 12px; border: 1px solid var(--site-border); border-radius: 14px; display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px; background: rgb(var(--v-theme-surface)); }
+.setlist-drag-handle { width: 32px; height: 42px; border: 0; border-radius: 9px; display: grid; place-items: center; color: var(--site-muted); background: transparent; cursor: grab; }
+.setlist-drag-handle:active { cursor: grabbing; }
+.setlist-position { width: 28px; height: 28px; margin-top: 7px; border-radius: 9px; display: grid; place-items: center; font-size: .75rem; font-weight: 800; color: #183b38; background: rgb(57 197 187 / 22%); }
+.setlist-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.setlist-flags { display: flex; gap: 12px; align-items: center; }
+.setlist-actions { display: flex; flex-direction: column; }
+.source-row { padding: 12px; border: 1px solid var(--site-border); border-radius: 14px; display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(130px, 1fr) auto minmax(140px, 1fr) auto; gap: 8px; align-items: start; }
+.editor-actions { position: sticky; z-index: 3; bottom: 0; margin: 8px -26px -22px; padding: 16px 26px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--site-border); background: rgb(var(--v-theme-surface)); }
+@media (max-width: 760px) { .editor-header, .event-form { padding-inline: 18px; } .form-grid, .setlist-fields { grid-template-columns: 1fr; } .section-heading { flex-direction: column; } .section-actions { justify-content: flex-start; } .setlist-row { grid-template-columns: auto auto 1fr; } .setlist-actions { grid-column: 3; flex-direction: row; justify-content: flex-end; } .source-row { grid-template-columns: 1fr; } .editor-actions { margin-inline: -18px; padding-inline: 18px; } }
+</style>

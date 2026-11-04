@@ -2786,6 +2786,11 @@
   resolved "https://registry.yarnpkg.com/@types/resolve/-/resolve-1.20.2.tgz#97d26e00cd4a0423b4af620abecf3e6f442b7975"
   integrity sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q==
 
+"@types/sortablejs@^1.15.8":
+  version "1.15.9"
+  resolved "https://registry.yarnpkg.com/@types/sortablejs/-/sortablejs-1.15.9.tgz#82d2337f54d4db827914d80dee5cf65539ae3c8b"
+  integrity sha512-7HP+rZGE2p886PKV9c9OJzLBI6BBJu1O7lJGYnPyG3fS4/duUCcngkNCjsLwIMV+WMqANe3tt4irrXHSIe68OQ==
+
 "@types/trusted-types@^2.0.7":
   version "2.0.7"
   resolved "https://registry.yarnpkg.com/@types/trusted-types/-/trusted-types-2.0.7.tgz#baccb07a970b91707df3a3e8ba6896c57ead2d11"
@@ -7048,6 +7053,13 @@ vue-devtools-stub@^0.1.0:
   version "0.1.0"
   resolved "https://registry.yarnpkg.com/vue-devtools-stub/-/vue-devtools-stub-0.1.0.tgz#a65b9485edecd4273cedcb8102c739b83add2c81"
   integrity sha512-RutnB7X8c5hjq39NceArgXg28WZtZpGc3+J16ljMiYnFhKvd8hITxSWQSQ5bvldxMDU6gG5mkxl1MTQLXckVSQ==
+
+vue-draggable-plus@^0.6.1:
+  version "0.6.1"
+  resolved "https://registry.yarnpkg.com/vue-draggable-plus/-/vue-draggable-plus-0.6.1.tgz#d4ed54cbfd3e2a72c046074c39da1631e0c36a78"
+  integrity sha512-FbtQ/fuoixiOfTZzG3yoPl4JAo9HJXRHmBQZFB9x2NYCh6pq0TomHf7g5MUmpaDYv+LU2n6BPq2YN9sBO+FbIg==
+  dependencies:
+    "@types/sortablejs" "^1.15.8"
 
 vue-i18n@^10.0.0:
   version "10.0.8"

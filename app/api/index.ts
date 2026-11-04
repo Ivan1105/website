@@ -14,6 +14,49 @@ export type {
 export { useAdminApi } from './admin'
 export type { AdminPaginationDTO, AdminUserDTO, QueryUsersDTO, ResetPasswordDTO, UpdateActiveReq } from './admin'
 
+export {
+  CONFIDENCE_LEVELS,
+  EVENT_STATUSES,
+  EVENT_TYPES,
+  SONG_SINGERS,
+  SONG_STATUSES,
+  SOURCE_RELATION_TYPES,
+  SOURCE_RELIABILITIES,
+  SOURCE_TYPES,
+  TOUR_STATUSES,
+  useConcertAdminApi,
+} from './concert-admin'
+export type {
+  BaseConcertDTO,
+  ConcertPageDTO,
+  ConcertPaginationDTO,
+  ConcertResource,
+  Confidence,
+  EventDTO,
+  EventInput,
+  EventSourceDTO,
+  EventSourceInput,
+  EventStatus,
+  EventType,
+  ListQuery,
+  SetlistItemDTO,
+  SetlistItemInput,
+  SongDTO,
+  SongInput,
+  SongSinger,
+  SongStatus,
+  SourceDTO,
+  SourceInput,
+  SourceRelationType,
+  SourceReliability,
+  SourceType,
+  TourDTO,
+  TourInput,
+  TourStatus,
+  VenueDTO,
+  VenueInput,
+} from './concert-admin'
+
 export { useChatApi } from './chat'
 export type {
   ActiveRunDTO,

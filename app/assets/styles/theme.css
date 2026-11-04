@@ -44,7 +44,13 @@ a:where(:not(.v-btn)) {
   outline-offset: 4px;
 }
 
-.v-field__input:focus-visible {
+.v-field__input:focus-visible,
+.v-field__field:focus-visible,
+.v-select__selection:focus-visible {
+  outline: none;
+}
+
+.v-field :where(input, textarea, [tabindex]):focus-visible {
   outline: none;
 }
 
