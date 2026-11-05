@@ -56,6 +56,10 @@
                 <td><v-chip size="small" variant="tonal" :color="statusColor(item)">{{ statusText(item) }}</v-chip></td>
                 <td>{{ formatTimestamp(item.updated_at) }}</td>
                 <td class="actions-column">
+                  <v-btn
+                    v-if="section === 'events'" icon="mdi-content-copy" variant="text" size="small"
+                    :aria-label="`复制${primaryText(item)}`" @click="openCopy(item)"
+                  />
                   <v-btn icon="mdi-pencil-outline" variant="text" size="small" aria-label="编辑" @click="openEdit(item)" />
                   <v-btn icon="mdi-delete-outline" variant="text" color="error" size="small" aria-label="删除" @click="openDelete(item)" />
                 </td>
@@ -76,7 +80,7 @@
       @update:model-value="handleDrawerModel"
     >
       <ConcertEventEditor
-        v-if="section === 'events'" :record="editingRecord as EventDTO | null"
+        v-if="section === 'events'" :record="editingRecord as EventDTO | null" :copy-source="copyingRecord"
         @saved="handleEventSaved" @cancel="requestCloseEditor" @dirty-change="dirty = $event" @switch-resource="requestSection"
       />
       <ConcertReferenceEditor
@@ -150,6 +154,7 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const editorOpen = ref(false)
 const editingRecord = ref<KnowledgeRecord | null>(null)
+const copyingRecord = ref<EventDTO | null>(null)
 const dirty = ref(false)
 const deleteOpen = ref(false)
 const deletingItem = ref<KnowledgeRecord | null>(null)
@@ -222,10 +227,17 @@ async function loadItems(page: number) {
 
 function applyFilters() { void loadItems(0) }
 function clearSearch() { search.value = ''; void loadItems(0) }
-function openCreate() { editingRecord.value = null; dirty.value = false; editorOpen.value = true }
-function openEdit(item: KnowledgeRecord) { editingRecord.value = item; dirty.value = false; editorOpen.value = true }
+function openCreate() { editingRecord.value = null; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
+function openEdit(item: KnowledgeRecord) { editingRecord.value = item; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
+function openCopy(item: KnowledgeRecord) {
+  if (!('official_name' in item)) return
+  editingRecord.value = null
+  copyingRecord.value = item
+  dirty.value = false
+  editorOpen.value = true
+}
 function handleDrawerModel(open: boolean) { if (!open) requestCloseEditor() }
-function requestCloseEditor() { runGuarded(() => { editorOpen.value = false; editingRecord.value = null; dirty.value = false }) }
+function requestCloseEditor() { runGuarded(() => { editorOpen.value = false; editingRecord.value = null; copyingRecord.value = null; dirty.value = false }) }
 
 function requestSection(value: string) {
   const next = parseSection(value)
@@ -233,6 +245,7 @@ function requestSection(value: string) {
   runGuarded(() => {
     editorOpen.value = false
     editingRecord.value = null
+    copyingRecord.value = null
     dirty.value = false
     void router.replace({ query: { ...route.query, section: next } })
   })
@@ -261,11 +274,15 @@ function handleReferenceSaved(record: ReferenceRecord) {
   dirty.value = false
   editorOpen.value = false
   editingRecord.value = null
+  copyingRecord.value = null
   void loadItems(pagination.value.page)
 }
 function handleEventSaved(record: EventDTO) {
+  const copied = copyingRecord.value !== null
+  copyingRecord.value = null
   editingRecord.value = record
-  successMessage.value = '演出资料已保存'
+  dirty.value = false
+  successMessage.value = copied ? '场次副本已创建' : '演出资料已保存'
   successOpen.value = true
   void loadItems(pagination.value.page)
 }
@@ -353,7 +370,7 @@ function handleApiError(caught: unknown, fallback: string) {
 .knowledge-table th { white-space: nowrap; color: var(--site-muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .07em; }
 .primary-cell { min-width: 210px; display: grid; gap: 3px; }
 .primary-cell span { color: var(--site-muted); font-size: .75rem; }
-.actions-column { width: 112px; white-space: nowrap; text-align: right !important; }
+.actions-column { width: 152px; white-space: nowrap; text-align: right !important; }
 .knowledge-pagination { padding: 16px 20px; border-top: 1px solid var(--site-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--site-muted); font-size: .85rem; }
 .knowledge-drawer :deep(.v-navigation-drawer__content) { overflow-y: auto; }
 @media (max-width: 760px) { .knowledge-page { padding-block: 34px 64px; } .knowledge-heading { align-items: flex-start; flex-direction: column; } .knowledge-heading-actions { width: 100%; flex-direction: column-reverse; } .knowledge-heading-actions .v-btn { width: 100%; } .knowledge-toolbar { grid-template-columns: 1fr auto; } .knowledge-toolbar > :first-child { grid-column: 1 / -1; } .knowledge-pagination { align-items: flex-start; flex-direction: column; } }

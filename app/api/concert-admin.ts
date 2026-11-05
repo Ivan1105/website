@@ -186,8 +186,7 @@ export interface EventSourceDTO extends Required<Pick<EventSourceInput, 'source_
 }
 
 export interface SetlistItemInput {
-  song_id?: number | null
-  title_as_performed: string
+  song_id: number
   version_label?: string | null
   is_encore?: boolean
   is_medley?: boolean
@@ -199,7 +198,6 @@ export interface SetlistItemDTO extends BaseConcertDTO {
   event_id: number
   position: number
   song_id: number | null
-  title_as_performed: string
   version_label: string | null
   is_encore: boolean
   is_medley: boolean

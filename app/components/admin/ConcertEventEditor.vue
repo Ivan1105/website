@@ -1,12 +1,18 @@
 <template>
   <div class="event-editor">
     <header class="editor-header">
-      <div><p class="eyebrow">EVENT / 演出场次</p><h2>{{ currentEvent ? '编辑演出场次' : '新增演出场次' }}</h2></div>
+      <div><p class="eyebrow">EVENT / 演出场次</p><h2>{{ editorTitle }}</h2></div>
       <v-btn icon="mdi-close" variant="text" aria-label="关闭编辑器" :disabled="saving" @click="$emit('cancel')" />
     </header>
 
-    <v-alert v-if="error" type="error" variant="tonal" density="comfortable" closable @click:close="error = null">{{ error }}</v-alert>
+    <v-alert
+      v-if="error" type="error" variant="tonal" density="comfortable" :closable="!relationsLoadFailed"
+      @click:close="error = null"
+    >{{ error }}</v-alert>
     <v-alert v-if="success" type="success" variant="tonal" density="compact" closable @click:close="success = null">{{ success }}</v-alert>
+    <v-alert v-if="copyingMode && relationsLoading" type="info" variant="tonal" density="compact">
+      正在复制原场次的歌单和资料来源，请稍候。
+    </v-alert>
 
     <v-form class="event-form" @submit.prevent="save">
       <section class="form-section">
@@ -45,12 +51,12 @@
         <v-textarea v-model="form.notes" label="备注" rows="3" auto-grow />
       </section>
 
-      <template v-if="currentEvent">
+      <template v-if="canEditRelations">
         <section class="form-section">
           <div class="section-heading">
             <div><p class="eyebrow">SETLIST</p><h3>歌单</h3><p class="muted">拖动手柄调整顺序，保存时将整单覆盖。</p></div>
             <div class="section-actions">
-              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-music-note-plus" @click="addSetlistItem">添加歌曲</v-btn>
+              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-music-note-plus" :disabled="relationsLoading" @click="addSetlistItem">添加歌曲</v-btn>
               <v-btn variant="text" color="secondary" size="small" @click="$emit('switch-resource', 'songs')">维护歌曲库</v-btn>
             </div>
           </div>
@@ -65,9 +71,7 @@
                 <v-autocomplete
                   v-model="item.song_id" label="标准歌曲" :items="songOptions" item-title="title" item-value="id"
                   density="compact" clearable no-data-text="noData.songs" :loading="optionLoading.songs" @update:search="searchSongs"
-                  @update:model-value="selectSong(item)"
                 />
-                <v-text-field v-model.trim="item.title_as_performed" label="现场名称 *" density="compact" />
                 <v-text-field v-model.trim="item.version_label" label="版本" density="compact" />
                 <v-select v-model="item.confidence" label="确认级别" :items="confidenceItems" density="compact" />
                 <div class="setlist-flags">
@@ -88,11 +92,12 @@
           <div class="section-heading">
             <div><p class="eyebrow">SOURCES</p><h3>资料来源</h3><p class="muted">记录场次信息和歌单的可追溯来源。</p></div>
             <div class="section-actions">
-              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-link-plus" @click="addSource">添加来源</v-btn>
+              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-link-plus" :disabled="relationsLoading" @click="addSource">添加来源</v-btn>
               <v-btn variant="text" color="secondary" size="small" @click="$emit('switch-resource', 'sources')">维护来源库</v-btn>
             </div>
           </div>
-          <div v-if="!eventSources.length" class="relation-empty">尚未关联资料来源。</div>
+          <div v-if="relationsLoading" class="relation-loading"><v-progress-circular indeterminate size="24" width="2" color="primary" /> 正在加载资料来源…</div>
+          <div v-else-if="!eventSources.length" class="relation-empty">尚未关联资料来源。</div>
           <div v-else class="source-list">
             <article v-for="(item, index) in eventSources" :key="item.key" class="source-row">
               <v-autocomplete
@@ -114,7 +119,10 @@
 
       <footer class="editor-actions">
         <v-btn variant="text" :disabled="saving" @click="$emit('cancel')">关闭</v-btn>
-        <v-btn type="submit" color="primary" :loading="saving" prepend-icon="mdi-content-save-outline">
+        <v-btn
+          type="submit" color="primary" :loading="saving" :disabled="relationsLoading || relationsLoadFailed"
+          prepend-icon="mdi-content-save-outline"
+        >
           {{ currentEvent ? '保存全部' : '保存并继续编辑' }}
         </v-btn>
       </footer>
@@ -148,11 +156,11 @@ interface EventFormState {
   local_date: string; local_start_time: string; local_end_date: string; local_end_time: string
   status: EventDTO['status']; confidence: EventDTO['confidence']; notes: string
 }
-interface EditableSetlistItem extends SetlistItemInput { key: string; version_label: string; confidence: EventDTO['confidence']; notes: string; is_encore: boolean; is_medley: boolean }
+interface EditableSetlistItem extends Omit<SetlistItemInput, 'song_id'> { key: string; song_id: number | null; version_label: string; confidence: EventDTO['confidence']; notes: string; is_encore: boolean; is_medley: boolean }
 interface EditableEventSource extends Omit<EventSourceInput, 'source_id'> { key: string; source_id: number | null; is_primary: boolean; note: string }
 type SourceOption = SourceDTO & { display_title: string }
 
-const props = defineProps<{ record: EventDTO | null }>()
+const props = defineProps<{ record: EventDTO | null; copySource: EventDTO | null }>()
 const emit = defineEmits<{
   saved: [record: EventDTO]
   cancel: []
@@ -170,11 +178,13 @@ const songOptions = ref<SongDTO[]>([])
 const sourceOptions = ref<SourceOption[]>([])
 const optionLoading = reactive({ tours: false, venues: false, songs: false, sources: false })
 const relationsLoading = ref(false)
+const relationsLoadFailed = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 const success = ref<string | null>(null)
 const baseline = ref('')
 const optionRequest = reactive({ tours: 0, venues: 0, songs: 0, sources: 0 })
+let resetVersion = 0
 
 const eventTypeItems = enumItems(eventTypeLabels)
 const eventStatusItems = enumItems(eventStatusLabels)
@@ -182,6 +192,9 @@ const confidenceItems = enumItems(confidenceLabels)
 const sourceRelationItems = enumItems(sourceRelationLabels)
 const requiredRules = [(value: string) => !!value?.trim() || '此项为必填']
 const slugRules = [...requiredRules, (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) || '只能包含小写字母、数字和连字符']
+const copyingMode = computed(() => props.copySource !== null && props.record === null)
+const canEditRelations = computed(() => currentEvent.value !== null || copyingMode.value)
+const editorTitle = computed(() => currentEvent.value ? '编辑演出场次' : copyingMode.value ? '复制演出场次' : '新增演出场次')
 
 const timeState = computed(() => {
   try {
@@ -203,20 +216,30 @@ const timePreview = computed(() => timeState.value.start
   ? `UTC：${timeState.value.start}${timeState.value.end ? ` — ${timeState.value.end}` : ''}`
   : form.local_date ? '已记录当地日期；填写开始时间后将自动换算 UTC。' : '')
 
-watch(() => props.record, reset, { immediate: true })
+watch(() => [props.record, props.copySource] as const, reset, { immediate: true })
 watch([form, setlist, eventSources], () => emit('dirty-change', snapshot() !== baseline.value), { deep: true })
 
 async function reset() {
+  const version = ++resetVersion
   currentEvent.value = props.record
   Object.assign(form, emptyForm())
   setlist.value = []
   eventSources.value = []
+  relationsLoading.value = false
+  relationsLoadFailed.value = false
   error.value = null
   success.value = null
   if (props.record) fillForm(props.record)
+  else if (props.copySource) {
+    fillCopyForm(props.copySource)
+    markUnsavedCopy(version)
+  }
   await Promise.all([loadTours(), loadVenues(), loadSongs(), loadSources()])
-  if (props.record) await loadRelations(props.record.id)
-  markClean()
+  if (version !== resetVersion) return
+  const relationSource = props.record ?? props.copySource
+  if (relationSource) await loadRelations(relationSource.id, version)
+  if (version !== resetVersion) return
+  if (!copyingMode.value) markClean(version)
 }
 
 function emptyForm(): EventFormState {
@@ -236,13 +259,24 @@ function fillForm(record: EventDTO) {
   })
 }
 
-async function loadRelations(id: number) {
+function fillCopyForm(record: EventDTO) {
+  fillForm(record)
+  Object.assign(form, {
+    slug: '',
+    local_date: '',
+    local_start_time: '',
+    local_end_date: '',
+    local_end_time: '',
+  })
+}
+
+async function loadRelations(id: number, version: number) {
   relationsLoading.value = true
   try {
     const [setlistData, sourceData] = await Promise.all([concertAdminApi.getSetlist(id), concertAdminApi.getEventSources(id)])
+    if (version !== resetVersion) return
     setlist.value = setlistData.map(item => ({
-      key: crypto.randomUUID(), song_id: item.song_id, title_as_performed: item.title_as_performed,
-      version_label: item.version_label ?? '', is_encore: item.is_encore,
+      key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '', is_encore: item.is_encore,
       is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '',
     }))
     eventSources.value = sourceData.map(item => ({
@@ -252,19 +286,23 @@ async function loadRelations(id: number) {
     mergeOptions(songOptions, setlistData.flatMap(item => item.song ? [item.song] : []))
     mergeSourceOptions(sourceData.flatMap(item => item.source ? [item.source] : []))
   } catch (caught) {
-    error.value = isApiError(caught) ? caught.message : '暂时无法加载歌单和来源。'
+    if (version !== resetVersion) return
+    setlist.value = []
+    eventSources.value = []
+    relationsLoadFailed.value = true
+    error.value = isApiError(caught) ? caught.message : '暂时无法加载歌单和来源，请关闭后重试。'
   } finally {
-    relationsLoading.value = false
+    if (version === resetVersion) relationsLoading.value = false
   }
 }
 
 async function save() {
-  if (saving.value) return
+  if (saving.value || relationsLoading.value || relationsLoadFailed.value) return
   error.value = null
   success.value = null
   if (!form.official_name.trim() || !form.slug.trim() || !form.timezone.trim()) { error.value = '请填写所有必填项。'; return }
   if (timeError.value) { error.value = timeError.value; return }
-  if (setlist.value.some(item => !item.title_as_performed.trim())) { error.value = '歌单中的现场名称不能为空。'; return }
+  if (setlist.value.some(item => item.song_id === null)) { error.value = '请选择歌单中的每首标准歌曲。'; return }
   if (eventSources.value.some(item => item.source_id === null)) { error.value = '请选择每条关联的资料来源。'; return }
   if (hasDuplicatePrimarySources()) { error.value = '同一关联类型最多只能有一个主要来源。'; return }
   saving.value = true
@@ -275,15 +313,15 @@ async function save() {
       : await concertAdminApi.createEvent(input)
     currentEvent.value = saved
     fillForm(saved)
-    if (props.record || setlist.value.length || eventSources.value.length) {
+    if (props.record || props.copySource || setlist.value.length || eventSources.value.length) {
       const [savedSetlist, savedSources] = await Promise.all([
         concertAdminApi.replaceSetlist(saved.id, setlist.value.map(toSetlistInput)),
         concertAdminApi.replaceEventSources(saved.id, eventSources.value.map(toSourceInput)),
       ])
-      setlist.value = savedSetlist.map(item => ({ key: crypto.randomUUID(), song_id: item.song_id, title_as_performed: item.title_as_performed, version_label: item.version_label ?? '', is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '' }))
+      setlist.value = savedSetlist.map(item => ({ key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '', is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '' }))
       eventSources.value = savedSources.map(item => ({ key: crypto.randomUUID(), source_id: item.source_id, relation_type: item.relation_type, is_primary: item.is_primary, note: item.note ?? '' }))
     }
-    success.value = props.record ? '演出资料已保存。' : '场次已创建，现在可以继续维护歌单和来源。'
+    success.value = props.record ? '演出资料已保存。' : props.copySource ? '场次副本已创建，现在可以继续编辑。' : '场次已创建，现在可以继续维护歌单和来源。'
     markClean()
     emit('saved', saved)
   } catch (caught) {
@@ -303,11 +341,10 @@ function buildInput(): EventInput {
   }
 }
 
-function addSetlistItem() { setlist.value.push({ key: crypto.randomUUID(), song_id: null, title_as_performed: '', version_label: '', is_encore: false, is_medley: false, confidence: 'confirmed', notes: '' }) }
+function addSetlistItem() { setlist.value.push({ key: crypto.randomUUID(), song_id: null, version_label: '', is_encore: false, is_medley: false, confidence: 'confirmed', notes: '' }) }
 function addSource() { eventSources.value.push({ key: crypto.randomUUID(), source_id: null, relation_type: 'event_info', is_primary: false, note: '' }) }
 function moveSetlist(index: number, delta: number) { const target = index + delta; if (target < 0 || target >= setlist.value.length) return; const [item] = setlist.value.splice(index, 1); if (item) setlist.value.splice(target, 0, item) }
-function selectSong(item: EditableSetlistItem) { const song = songOptions.value.find(option => option.id === item.song_id); if (song && !item.title_as_performed.trim()) item.title_as_performed = song.title }
-function toSetlistInput(item: EditableSetlistItem): SetlistItemInput { return { song_id: item.song_id, title_as_performed: item.title_as_performed.trim(), version_label: toNullable(item.version_label), is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: toNullable(item.notes) } }
+function toSetlistInput(item: EditableSetlistItem): SetlistItemInput { return { song_id: item.song_id!, version_label: toNullable(item.version_label), is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: toNullable(item.notes) } }
 function toSourceInput(item: EditableEventSource): EventSourceInput { return { source_id: item.source_id!, relation_type: item.relation_type, is_primary: item.is_primary, note: toNullable(item.note) } }
 function hasDuplicatePrimarySources() { const types = eventSources.value.filter(item => item.is_primary).map(item => item.relation_type); return new Set(types).size !== types.length }
 
@@ -328,7 +365,8 @@ async function loadOption<K extends keyof typeof optionLoading, T>(key: K, opera
 function mergeOptions<T extends { id: number }>(target: Ref<T[]>, incoming: T[]) { const map = new Map(target.value.map(item => [item.id, item])); incoming.forEach(item => map.set(item.id, item)); target.value = [...map.values()] }
 function mergeSourceOptions(incoming: SourceDTO[]) { mergeOptions(sourceOptions, incoming.map(item => ({ ...item, display_title: item.title || item.publisher || item.url }))) }
 function snapshot() { return JSON.stringify({ form, setlist: setlist.value.map(({ key: _key, ...item }) => item), sources: eventSources.value.map(({ key: _key, ...item }) => item) }) }
-function markClean() { nextTick(() => { baseline.value = snapshot(); emit('dirty-change', false) }) }
+function markClean(version = resetVersion) { nextTick(() => { if (version !== resetVersion) return; baseline.value = snapshot(); emit('dirty-change', false) }) }
+function markUnsavedCopy(version: number) { nextTick(() => { if (version !== resetVersion) return; baseline.value = '__unsaved_copy__'; emit('dirty-change', true) }) }
 </script>
 
 <style scoped>
