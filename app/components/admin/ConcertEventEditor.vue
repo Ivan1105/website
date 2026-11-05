@@ -11,7 +11,7 @@
     >{{ error }}</v-alert>
     <v-alert v-if="success" type="success" variant="tonal" density="compact" closable @click:close="success = null">{{ success }}</v-alert>
     <v-alert v-if="copyingMode && relationsLoading" type="info" variant="tonal" density="compact">
-      正在复制原场次的歌单和资料来源，请稍候。
+      正在复制原场次的歌单，请稍候。
     </v-alert>
 
     <v-form class="event-form" @submit.prevent="save">
@@ -88,33 +88,10 @@
           </VueDraggable>
         </section>
 
-        <section class="form-section">
-          <div class="section-heading">
-            <div><p class="eyebrow">SOURCES</p><h3>资料来源</h3><p class="muted">记录场次信息和歌单的可追溯来源。</p></div>
-            <div class="section-actions">
-              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-link-plus" :disabled="relationsLoading" @click="addSource">添加来源</v-btn>
-              <v-btn variant="text" color="secondary" size="small" @click="$emit('switch-resource', 'sources')">维护来源库</v-btn>
-            </div>
-          </div>
-          <div v-if="relationsLoading" class="relation-loading"><v-progress-circular indeterminate size="24" width="2" color="primary" /> 正在加载资料来源…</div>
-          <div v-else-if="!eventSources.length" class="relation-empty">尚未关联资料来源。</div>
-          <div v-else class="source-list">
-            <article v-for="(item, index) in eventSources" :key="item.key" class="source-row">
-              <v-autocomplete
-                v-model="item.source_id" label="资料来源 *" :items="sourceOptions" item-title="display_title" item-value="id"
-                density="compact" clearable no-data-text="noData.sources" :loading="optionLoading.sources" @update:search="searchSources"
-              />
-              <v-select v-model="item.relation_type" label="关联类型" :items="sourceRelationItems" density="compact" />
-              <v-checkbox v-model="item.is_primary" label="主要来源" density="compact" hide-details />
-              <v-text-field v-model.trim="item.note" label="备注" density="compact" />
-              <v-btn icon="mdi-delete-outline" variant="text" color="error" aria-label="删除来源关联" @click="eventSources.splice(index, 1)" />
-            </article>
-          </div>
-        </section>
       </template>
 
       <v-alert v-else type="info" variant="tonal" density="comfortable">
-        请先保存基础信息。创建场次后即可维护歌单和资料来源。
+        请先保存基础信息。创建场次后即可维护歌单。
       </v-alert>
 
       <footer class="editor-actions">
@@ -138,15 +115,13 @@ import {
   type ConcertResource,
   type EventDTO,
   type EventInput,
-  type EventSourceInput,
   type SetlistItemInput,
   type SongDTO,
-  type SourceDTO,
   type TourDTO,
   type VenueDTO,
 } from '@/api'
 import {
-  confidenceLabels, enumItems, eventStatusLabels, eventTypeLabels, sourceRelationLabels,
+  confidenceLabels, enumItems, eventStatusLabels, eventTypeLabels,
   timezoneSuggestions, toLocalDateTimeInput, toNullable, zonedLocalToUtc,
 } from '@/utils/concert-admin'
 
@@ -157,39 +132,34 @@ interface EventFormState {
   status: EventDTO['status']; confidence: EventDTO['confidence']; notes: string
 }
 interface EditableSetlistItem extends Omit<SetlistItemInput, 'song_id'> { key: string; song_id: number | null; version_label: string; confidence: EventDTO['confidence']; notes: string; is_encore: boolean; is_medley: boolean }
-interface EditableEventSource extends Omit<EventSourceInput, 'source_id'> { key: string; source_id: number | null; is_primary: boolean; note: string }
-type SourceOption = SourceDTO & { display_title: string }
 
 const props = defineProps<{ record: EventDTO | null; copySource: EventDTO | null }>()
 const emit = defineEmits<{
   saved: [record: EventDTO]
   cancel: []
   'dirty-change': [dirty: boolean]
-  'switch-resource': [resource: Extract<ConcertResource, 'songs' | 'sources'>]
+  'switch-resource': [resource: Extract<ConcertResource, 'songs'>]
 }>()
 const { concertAdminApi } = useConcertAdminApi()
 const currentEvent = ref<EventDTO | null>(null)
 const form = reactive<EventFormState>(emptyForm())
 const setlist = ref<EditableSetlistItem[]>([])
-const eventSources = ref<EditableEventSource[]>([])
 const tourOptions = ref<TourDTO[]>([])
 const venueOptions = ref<VenueDTO[]>([])
 const songOptions = ref<SongDTO[]>([])
-const sourceOptions = ref<SourceOption[]>([])
-const optionLoading = reactive({ tours: false, venues: false, songs: false, sources: false })
+const optionLoading = reactive({ tours: false, venues: false, songs: false })
 const relationsLoading = ref(false)
 const relationsLoadFailed = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 const success = ref<string | null>(null)
 const baseline = ref('')
-const optionRequest = reactive({ tours: 0, venues: 0, songs: 0, sources: 0 })
+const optionRequest = reactive({ tours: 0, venues: 0, songs: 0 })
 let resetVersion = 0
 
 const eventTypeItems = enumItems(eventTypeLabels)
 const eventStatusItems = enumItems(eventStatusLabels)
 const confidenceItems = enumItems(confidenceLabels)
-const sourceRelationItems = enumItems(sourceRelationLabels)
 const requiredRules = [(value: string) => !!value?.trim() || '此项为必填']
 const slugRules = [...requiredRules, (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) || '只能包含小写字母、数字和连字符']
 const copyingMode = computed(() => props.copySource !== null && props.record === null)
@@ -217,14 +187,13 @@ const timePreview = computed(() => timeState.value.start
   : form.local_date ? '已记录当地日期；填写开始时间后将自动换算 UTC。' : '')
 
 watch(() => [props.record, props.copySource] as const, reset, { immediate: true })
-watch([form, setlist, eventSources], () => emit('dirty-change', snapshot() !== baseline.value), { deep: true })
+watch([form, setlist], () => emit('dirty-change', snapshot() !== baseline.value), { deep: true })
 
 async function reset() {
   const version = ++resetVersion
   currentEvent.value = props.record
   Object.assign(form, emptyForm())
   setlist.value = []
-  eventSources.value = []
   relationsLoading.value = false
   relationsLoadFailed.value = false
   error.value = null
@@ -234,7 +203,7 @@ async function reset() {
     fillCopyForm(props.copySource)
     markUnsavedCopy(version)
   }
-  await Promise.all([loadTours(), loadVenues(), loadSongs(), loadSources()])
+  await Promise.all([loadTours(), loadVenues(), loadSongs()])
   if (version !== resetVersion) return
   const relationSource = props.record ?? props.copySource
   if (relationSource) await loadRelations(relationSource.id, version)
@@ -273,24 +242,18 @@ function fillCopyForm(record: EventDTO) {
 async function loadRelations(id: number, version: number) {
   relationsLoading.value = true
   try {
-    const [setlistData, sourceData] = await Promise.all([concertAdminApi.getSetlist(id), concertAdminApi.getEventSources(id)])
+    const setlistData = await concertAdminApi.getSetlist(id)
     if (version !== resetVersion) return
     setlist.value = setlistData.map(item => ({
       key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '', is_encore: item.is_encore,
       is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '',
     }))
-    eventSources.value = sourceData.map(item => ({
-      key: crypto.randomUUID(), source_id: item.source_id, relation_type: item.relation_type,
-      is_primary: item.is_primary, note: item.note ?? '',
-    }))
     mergeOptions(songOptions, setlistData.flatMap(item => item.song ? [item.song] : []))
-    mergeSourceOptions(sourceData.flatMap(item => item.source ? [item.source] : []))
   } catch (caught) {
     if (version !== resetVersion) return
     setlist.value = []
-    eventSources.value = []
     relationsLoadFailed.value = true
-    error.value = isApiError(caught) ? caught.message : '暂时无法加载歌单和来源，请关闭后重试。'
+    error.value = isApiError(caught) ? caught.message : '暂时无法加载歌单，请关闭后重试。'
   } finally {
     if (version === resetVersion) relationsLoading.value = false
   }
@@ -303,8 +266,6 @@ async function save() {
   if (!form.official_name.trim() || !form.slug.trim() || !form.timezone.trim()) { error.value = '请填写所有必填项。'; return }
   if (timeError.value) { error.value = timeError.value; return }
   if (setlist.value.some(item => item.song_id === null)) { error.value = '请选择歌单中的每首标准歌曲。'; return }
-  if (eventSources.value.some(item => item.source_id === null)) { error.value = '请选择每条关联的资料来源。'; return }
-  if (hasDuplicatePrimarySources()) { error.value = '同一关联类型最多只能有一个主要来源。'; return }
   saving.value = true
   try {
     const input = buildInput()
@@ -313,15 +274,11 @@ async function save() {
       : await concertAdminApi.createEvent(input)
     currentEvent.value = saved
     fillForm(saved)
-    if (props.record || props.copySource || setlist.value.length || eventSources.value.length) {
-      const [savedSetlist, savedSources] = await Promise.all([
-        concertAdminApi.replaceSetlist(saved.id, setlist.value.map(toSetlistInput)),
-        concertAdminApi.replaceEventSources(saved.id, eventSources.value.map(toSourceInput)),
-      ])
+    if (props.record || props.copySource || setlist.value.length) {
+      const savedSetlist = await concertAdminApi.replaceSetlist(saved.id, setlist.value.map(toSetlistInput))
       setlist.value = savedSetlist.map(item => ({ key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '', is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '' }))
-      eventSources.value = savedSources.map(item => ({ key: crypto.randomUUID(), source_id: item.source_id, relation_type: item.relation_type, is_primary: item.is_primary, note: item.note ?? '' }))
     }
-    success.value = props.record ? '演出资料已保存。' : props.copySource ? '场次副本已创建，现在可以继续编辑。' : '场次已创建，现在可以继续维护歌单和来源。'
+    success.value = props.record ? '演出资料已保存。' : props.copySource ? '场次副本已创建，现在可以继续编辑。' : '场次已创建，现在可以继续维护歌单。'
     markClean()
     emit('saved', saved)
   } catch (caught) {
@@ -342,20 +299,15 @@ function buildInput(): EventInput {
 }
 
 function addSetlistItem() { setlist.value.push({ key: crypto.randomUUID(), song_id: null, version_label: '', is_encore: false, is_medley: false, confidence: 'confirmed', notes: '' }) }
-function addSource() { eventSources.value.push({ key: crypto.randomUUID(), source_id: null, relation_type: 'event_info', is_primary: false, note: '' }) }
 function moveSetlist(index: number, delta: number) { const target = index + delta; if (target < 0 || target >= setlist.value.length) return; const [item] = setlist.value.splice(index, 1); if (item) setlist.value.splice(target, 0, item) }
 function toSetlistInput(item: EditableSetlistItem): SetlistItemInput { return { song_id: item.song_id!, version_label: toNullable(item.version_label), is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: toNullable(item.notes) } }
-function toSourceInput(item: EditableEventSource): EventSourceInput { return { source_id: item.source_id!, relation_type: item.relation_type, is_primary: item.is_primary, note: toNullable(item.note) } }
-function hasDuplicatePrimarySources() { const types = eventSources.value.filter(item => item.is_primary).map(item => item.relation_type); return new Set(types).size !== types.length }
 
 async function loadTours(q?: string) { await loadOption('tours', () => concertAdminApi.listTours({ page_size: 50, q }), result => mergeOptions(tourOptions, result.items)) }
 async function loadVenues(q?: string) { await loadOption('venues', () => concertAdminApi.listVenues({ page_size: 50, q }), result => mergeOptions(venueOptions, result.items)) }
 async function loadSongs(q?: string) { await loadOption('songs', () => concertAdminApi.listSongs({ page_size: 50, q }), result => mergeOptions(songOptions, result.items)) }
-async function loadSources(q?: string) { await loadOption('sources', () => concertAdminApi.listSources({ page_size: 50, q }), result => mergeSourceOptions(result.items)) }
 function searchTours(value: string) { void loadTours(value?.trim() || undefined) }
 function searchVenues(value: string) { void loadVenues(value?.trim() || undefined) }
 function searchSongs(value: string) { void loadSongs(value?.trim() || undefined) }
-function searchSources(value: string) { void loadSources(value?.trim() || undefined) }
 
 async function loadOption<K extends keyof typeof optionLoading, T>(key: K, operation: () => Promise<T>, apply: (result: T) => void) {
   const request = ++optionRequest[key]
@@ -363,8 +315,7 @@ async function loadOption<K extends keyof typeof optionLoading, T>(key: K, opera
   try { const result = await operation(); if (request === optionRequest[key]) apply(result) } catch { /* 表单仍可继续编辑 */ } finally { if (request === optionRequest[key]) optionLoading[key] = false }
 }
 function mergeOptions<T extends { id: number }>(target: Ref<T[]>, incoming: T[]) { const map = new Map(target.value.map(item => [item.id, item])); incoming.forEach(item => map.set(item.id, item)); target.value = [...map.values()] }
-function mergeSourceOptions(incoming: SourceDTO[]) { mergeOptions(sourceOptions, incoming.map(item => ({ ...item, display_title: item.title || item.publisher || item.url }))) }
-function snapshot() { return JSON.stringify({ form, setlist: setlist.value.map(({ key: _key, ...item }) => item), sources: eventSources.value.map(({ key: _key, ...item }) => item) }) }
+function snapshot() { return JSON.stringify({ form, setlist: setlist.value.map(({ key: _key, ...item }) => item) }) }
 function markClean(version = resetVersion) { nextTick(() => { if (version !== resetVersion) return; baseline.value = snapshot(); emit('dirty-change', false) }) }
 function markUnsavedCopy(version: number) { nextTick(() => { if (version !== resetVersion) return; baseline.value = '__unsaved_copy__'; emit('dirty-change', true) }) }
 </script>
@@ -382,7 +333,7 @@ function markUnsavedCopy(version: number) { nextTick(() => { if (version !== res
 .time-preview { padding: 10px 12px; border-radius: 11px; display: flex; gap: 8px; color: rgb(var(--v-theme-success)); background: color-mix(in srgb, rgb(var(--v-theme-success)) 10%, transparent); font-size: .82rem; overflow-wrap: anywhere; }
 .time-preview-error { color: rgb(var(--v-theme-error)); background: color-mix(in srgb, rgb(var(--v-theme-error)) 10%, transparent); }
 .relation-loading, .relation-empty { min-height: 72px; padding: 20px; border: 1px dashed var(--site-border); border-radius: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--site-muted); }
-.setlist-list, .source-list { display: grid; gap: 10px; }
+.setlist-list { display: grid; gap: 10px; }
 .setlist-row { padding: 12px; border: 1px solid var(--site-border); border-radius: 14px; display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px; background: rgb(var(--v-theme-surface)); }
 .setlist-drag-handle { width: 32px; height: 42px; border: 0; border-radius: 9px; display: grid; place-items: center; color: var(--site-muted); background: transparent; cursor: grab; }
 .setlist-drag-handle:active { cursor: grabbing; }
@@ -390,7 +341,6 @@ function markUnsavedCopy(version: number) { nextTick(() => { if (version !== res
 .setlist-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .setlist-flags { display: flex; gap: 12px; align-items: center; }
 .setlist-actions { display: flex; flex-direction: column; }
-.source-row { padding: 12px; border: 1px solid var(--site-border); border-radius: 14px; display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(130px, 1fr) auto minmax(140px, 1fr) auto; gap: 8px; align-items: start; }
 .editor-actions { position: sticky; z-index: 3; bottom: 0; margin: 8px -26px -22px; padding: 16px 26px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--site-border); background: rgb(var(--v-theme-surface)); }
-@media (max-width: 760px) { .editor-header, .event-form { padding-inline: 18px; } .form-grid, .setlist-fields { grid-template-columns: 1fr; } .section-heading { flex-direction: column; } .section-actions { justify-content: flex-start; } .setlist-row { grid-template-columns: auto auto 1fr; } .setlist-actions { grid-column: 3; flex-direction: row; justify-content: flex-end; } .source-row { grid-template-columns: 1fr; } .editor-actions { margin-inline: -18px; padding-inline: 18px; } }
+@media (max-width: 760px) { .editor-header, .event-form { padding-inline: 18px; } .form-grid, .setlist-fields { grid-template-columns: 1fr; } .section-heading { flex-direction: column; } .section-actions { justify-content: flex-start; } .setlist-row { grid-template-columns: auto auto 1fr; } .setlist-actions { grid-column: 3; flex-direction: row; justify-content: flex-end; } .editor-actions { margin-inline: -18px; padding-inline: 18px; } }
 </style>

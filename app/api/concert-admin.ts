@@ -8,7 +8,7 @@ export const EVENT_TYPES = ['concert', 'festival', 'live_stream', 'special', 'un
 export const EVENT_STATUSES = ['planned', 'completed', 'cancelled', 'postponed', 'unknown'] as const
 export const SOURCE_TYPES = ['official', 'official_pdf', 'ticket', 'setlist', 'fan_report', 'video', 'database', 'unknown'] as const
 export const SOURCE_RELIABILITIES = ['high', 'medium', 'low', 'unknown'] as const
-export const SOURCE_RELATION_TYPES = ['event_info', 'setlist', 'venue', 'schedule', 'media', 'other'] as const
+export const SOURCE_RELATION_TYPES = ['tour_info', 'setlist', 'venue', 'schedule', 'media', 'other'] as const
 
 export type TourStatus = typeof TOUR_STATUSES[number]
 export type Confidence = typeof CONFIDENCE_LEVELS[number]
@@ -171,15 +171,15 @@ export interface EventInput {
   notes?: string | null
 }
 
-export interface EventSourceInput {
+export interface TourSourceInput {
   source_id: number
   relation_type: SourceRelationType
   is_primary?: boolean
   note?: string | null
 }
 
-export interface EventSourceDTO extends Required<Pick<EventSourceInput, 'source_id' | 'relation_type'>> {
-  event_id: number
+export interface TourSourceDTO extends Required<Pick<TourSourceInput, 'source_id' | 'relation_type'>> {
+  tour_id: number
   is_primary: boolean
   note: string | null
   source: SourceDTO | null
@@ -250,6 +250,8 @@ export const useConcertAdminApi = () => {
     createTour: (input: TourInput) => post<TourDTO>(`${base}/tours`, input),
     updateTour: (id: number, input: Partial<TourInput>) => patch<TourDTO>(`${base}/tours/${encodeId(id)}`, input),
     deleteTour: (id: number) => remove(`${base}/tours/${encodeId(id)}`),
+    getTourSources: (id: number) => get<TourSourceDTO[]>(`${base}/tours/${encodeId(id)}/sources`),
+    replaceTourSources: (id: number, items: TourSourceInput[]) => put<TourSourceDTO[]>(`${base}/tours/${encodeId(id)}/sources`, { items }),
 
     listVenues: (query: ListQuery = {}) => get<ConcertPageDTO<VenueDTO>>(`${base}/venues`, query),
     getVenue: (id: number) => get<VenueDTO>(`${base}/venues/${encodeId(id)}`),
@@ -275,8 +277,6 @@ export const useConcertAdminApi = () => {
     createEvent: (input: EventInput) => post<EventDTO>(`${base}/events`, input),
     updateEvent: (id: number, input: Partial<EventInput>) => patch<EventDTO>(`${base}/events/${encodeId(id)}`, input),
     deleteEvent: (id: number) => remove(`${base}/events/${encodeId(id)}`),
-    getEventSources: (id: number) => get<EventSourceDTO[]>(`${base}/events/${encodeId(id)}/sources`),
-    replaceEventSources: (id: number, items: EventSourceInput[]) => put<EventSourceDTO[]>(`${base}/events/${encodeId(id)}/sources`, { items }),
     getSetlist: (id: number) => get<SetlistItemDTO[]>(`${base}/events/${encodeId(id)}/setlist`),
     replaceSetlist: (id: number, items: SetlistItemInput[]) => put<SetlistItemDTO[]>(`${base}/events/${encodeId(id)}/setlist`, { items }),
   }

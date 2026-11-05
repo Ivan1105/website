@@ -32,7 +32,7 @@ export const sourceReliabilityLabels: Record<SourceReliability, string> = {
   high: '高', medium: '中', low: '低', unknown: '未知',
 }
 export const sourceRelationLabels: Record<SourceRelationType, string> = {
-  event_info: '活动信息', setlist: '歌单', venue: '场地', schedule: '日程', media: '媒体资料', other: '其他',
+  tour_info: '巡演信息', setlist: '歌单', venue: '场地', schedule: '日程', media: '媒体资料', other: '其他',
 }
 
 export const timezoneSuggestions = [

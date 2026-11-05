@@ -85,7 +85,7 @@
       />
       <ConcertReferenceEditor
         v-else :resource="section" :record="editingRecord as ReferenceRecord | null"
-        @saved="handleReferenceSaved" @cancel="requestCloseEditor" @dirty-change="dirty = $event"
+        @saved="handleReferenceSaved" @cancel="requestCloseEditor" @dirty-change="dirty = $event" @switch-resource="requestSection"
       />
     </v-navigation-drawer>
 
@@ -272,8 +272,11 @@ function handleReferenceSaved(record: ReferenceRecord) {
   successMessage.value = `${currentConfig.value.singular}已保存`
   successOpen.value = true
   dirty.value = false
-  editorOpen.value = false
-  editingRecord.value = null
+  if (section.value === 'tours') editingRecord.value = record
+  else {
+    editorOpen.value = false
+    editingRecord.value = null
+  }
   copyingRecord.value = null
   void loadItems(pagination.value.page)
 }

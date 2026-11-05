@@ -21,6 +21,31 @@
           <v-select v-model="form.confidence" label="确认级别" :items="confidenceItems" />
         </div>
         <v-textarea v-model="form.notes" label="备注" rows="4" auto-grow />
+
+        <section class="tour-sources-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">SOURCES</p><h3>资料来源</h3><p class="muted">资料来源归属于整个巡演，可供该巡演的所有场次使用。</p></div>
+            <div class="section-actions">
+              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-link-plus" :disabled="relationsLoading || !currentTour" @click="addTourSource">添加来源</v-btn>
+              <v-btn variant="text" color="secondary" size="small" @click="$emit('switch-resource', 'sources')">维护来源库</v-btn>
+            </div>
+          </div>
+          <v-alert v-if="!currentTour" type="info" variant="tonal" density="compact">请先保存巡演基础信息，再维护资料来源。</v-alert>
+          <div v-else-if="relationsLoading" class="relation-state"><v-progress-circular indeterminate size="24" width="2" color="primary" /> 正在加载资料来源…</div>
+          <div v-else-if="!tourSources.length" class="relation-state">尚未关联资料来源。</div>
+          <div v-else class="source-list">
+            <article v-for="(item, index) in tourSources" :key="item.key" class="source-row">
+              <v-autocomplete
+                v-model="item.source_id" label="资料来源 *" :items="sourceOptions" item-title="display_title" item-value="id"
+                density="compact" clearable no-data-text="noData.sources" :loading="sourceOptionsLoading" @update:search="searchSources"
+              />
+              <v-select v-model="item.relation_type" label="关联类型" :items="sourceRelationItems" density="compact" />
+              <v-checkbox v-model="item.is_primary" label="主要来源" density="compact" hide-details />
+              <v-text-field v-model.trim="item.note" label="备注" density="compact" />
+              <v-btn icon="mdi-delete-outline" variant="text" color="error" aria-label="删除来源关联" @click="tourSources.splice(index, 1)" />
+            </article>
+          </div>
+        </section>
       </template>
 
       <template v-else-if="resource === 'venues'">
@@ -73,7 +98,7 @@
 
       <footer class="editor-actions">
         <v-btn variant="text" :disabled="saving" @click="$emit('cancel')">取消</v-btn>
-        <v-btn type="submit" color="primary" :loading="saving" prepend-icon="mdi-content-save-outline">保存</v-btn>
+        <v-btn type="submit" color="primary" :loading="saving" :disabled="relationsLoading || relationsLoadFailed" prepend-icon="mdi-content-save-outline">{{ resource === 'tours' && !currentTour ? '保存并继续编辑' : '保存' }}</v-btn>
       </footer>
     </v-form>
   </div>
@@ -87,16 +112,19 @@ import {
   type SongDTO,
   type SourceDTO,
   type TourDTO,
+  type TourSourceInput,
   type VenueDTO,
 } from '@/api'
 import { isApiError } from '@/api'
 import {
-  confidenceLabels, enumItems, songStatusLabels, sourceReliabilityLabels,
+  confidenceLabels, enumItems, songStatusLabels, sourceRelationLabels, sourceReliabilityLabels,
   sourceTypeLabels, timezoneSuggestions, toNullable, tourStatusLabels,
 } from '@/utils/concert-admin'
 
 type ReferenceResource = 'tours' | 'venues' | 'songs' | 'sources'
 type ReferenceRecord = TourDTO | VenueDTO | SongDTO | SourceDTO
+interface EditableTourSource extends Omit<TourSourceInput, 'source_id'> { key: string; source_id: number | null; is_primary: boolean; note: string }
+type SourceOption = SourceDTO & { display_title: string }
 
 interface ReferenceFormState {
   slug: string; name: string; name_original: string; aliases: string[]; organizer: string
@@ -109,11 +137,19 @@ interface ReferenceFormState {
 }
 
 const props = defineProps<{ resource: ReferenceResource; record: ReferenceRecord | null }>()
-const emit = defineEmits<{ saved: [record: ReferenceRecord]; cancel: []; 'dirty-change': [dirty: boolean] }>()
+const emit = defineEmits<{ saved: [record: ReferenceRecord]; cancel: []; 'dirty-change': [dirty: boolean]; 'switch-resource': [resource: 'sources'] }>()
 const { concertAdminApi } = useConcertAdminApi()
 const saving = ref(false)
 const error = ref<string | null>(null)
 const baseline = ref('')
+const currentTour = ref<TourDTO | null>(null)
+const tourSources = ref<EditableTourSource[]>([])
+const sourceOptions = ref<SourceOption[]>([])
+const relationsLoading = ref(false)
+const relationsLoadFailed = ref(false)
+const sourceOptionsLoading = ref(false)
+let resetVersion = 0
+let sourceRequest = 0
 const producerOptions = ref<string[]>([])
 const producerLoading = ref(false)
 let producerRequest = 0
@@ -133,9 +169,10 @@ const songStatusItems = enumItems(songStatusLabels)
 const songSingerItems = [...SONG_SINGERS]
 const sourceTypeItems = enumItems(sourceTypeLabels)
 const sourceReliabilityItems = enumItems(sourceReliabilityLabels)
+const sourceRelationItems = enumItems(sourceRelationLabels)
 
 watch(() => [props.resource, props.record] as const, reset, { immediate: true })
-watch(form, () => emit('dirty-change', JSON.stringify(form) !== baseline.value), { deep: true })
+watch([form, tourSources], () => emit('dirty-change', snapshot() !== baseline.value), { deep: true })
 
 function emptyForm(): ReferenceFormState {
   return {
@@ -147,9 +184,14 @@ function emptyForm(): ReferenceFormState {
   }
 }
 
-function reset() {
+async function reset() {
+  const version = ++resetVersion
   const next = emptyForm()
   const record = props.record
+  currentTour.value = props.resource === 'tours' && record && 'name' in record ? record as TourDTO : null
+  tourSources.value = []
+  relationsLoading.value = false
+  relationsLoadFailed.value = false
   if (record) {
     Object.assign(next, record)
     if ('aliases' in record) next.aliases = record.aliases ? [...record.aliases] : []
@@ -162,15 +204,22 @@ function reset() {
   Object.assign(form, next)
   error.value = null
   nextTick(() => {
-    baseline.value = JSON.stringify(form)
+    baseline.value = snapshot()
     emit('dirty-change', false)
   })
   if (props.resource === 'songs') void loadProducerOptions()
+  if (props.resource === 'tours') {
+    await loadSourceOptions()
+    if (currentTour.value) await loadTourSources(currentTour.value.id, version)
+    if (version === resetVersion) markClean()
+  }
 }
 
 async function save() {
   if (saving.value) return
   error.value = null
+  if (props.resource === 'tours' && tourSources.value.some(item => item.source_id === null)) { error.value = '请选择每条关联的资料来源。'; return }
+  if (props.resource === 'tours' && hasDuplicatePrimarySources()) { error.value = '同一关联类型最多只能有一个主要来源。'; return }
   saving.value = true
   try {
     let saved: ReferenceRecord
@@ -207,7 +256,18 @@ async function save() {
       }
       saved = props.record ? await concertAdminApi.updateSource(props.record.id, input) : await concertAdminApi.createSource(input)
     }
-    baseline.value = JSON.stringify(form)
+    if (props.resource === 'tours') {
+      const tour = saved as TourDTO
+      currentTour.value = tour
+      if (props.record) {
+        const savedSources = await concertAdminApi.replaceTourSources(tour.id, tourSources.value.map(toTourSourceInput))
+        tourSources.value = savedSources.map(item => ({
+          key: crypto.randomUUID(), source_id: item.source_id, relation_type: item.relation_type,
+          is_primary: item.is_primary, note: item.note ?? '',
+        }))
+      }
+    }
+    baseline.value = snapshot()
     emit('dirty-change', false)
     emit('saved', saved)
   } catch (caught) {
@@ -220,6 +280,41 @@ async function save() {
 function normalizedAliases(): string[] | null {
   const aliases = [...new Set(form.aliases.map(item => item.trim()).filter(Boolean))]
   return aliases.length ? aliases : null
+}
+function addTourSource() { tourSources.value.push({ key: crypto.randomUUID(), source_id: null, relation_type: 'tour_info', is_primary: false, note: '' }) }
+function toTourSourceInput(item: EditableTourSource): TourSourceInput { return { source_id: item.source_id!, relation_type: item.relation_type, is_primary: item.is_primary, note: toNullable(item.note) } }
+function hasDuplicatePrimarySources() { const types = tourSources.value.filter(item => item.is_primary).map(item => item.relation_type); return new Set(types).size !== types.length }
+function snapshot() { return JSON.stringify({ form, tourSources: tourSources.value.map(({ key: _key, ...item }) => item) }) }
+function markClean() { nextTick(() => { baseline.value = snapshot(); emit('dirty-change', false) }) }
+async function loadTourSources(tourId: number, version: number) {
+  relationsLoading.value = true
+  try {
+    const items = await concertAdminApi.getTourSources(tourId)
+    if (version !== resetVersion) return
+    tourSources.value = items.map(item => ({ key: crypto.randomUUID(), source_id: item.source_id, relation_type: item.relation_type, is_primary: item.is_primary, note: item.note ?? '' }))
+    mergeSourceOptions(items.flatMap(item => item.source ? [item.source] : []))
+  } catch (caught) {
+    if (version !== resetVersion) return
+    relationsLoadFailed.value = true
+    error.value = isApiError(caught) ? caught.message : '暂时无法加载巡演资料来源，请关闭后重试。'
+  } finally {
+    if (version === resetVersion) relationsLoading.value = false
+  }
+}
+async function loadSourceOptions(q?: string) {
+  const request = ++sourceRequest
+  sourceOptionsLoading.value = true
+  try {
+    const result = await concertAdminApi.listSources({ page_size: 50, q })
+    if (request === sourceRequest) mergeSourceOptions(result.items)
+  } catch { /* 已选来源仍可继续编辑 */ }
+  finally { if (request === sourceRequest) sourceOptionsLoading.value = false }
+}
+function searchSources(value: string) { void loadSourceOptions(value?.trim() || undefined) }
+function mergeSourceOptions(items: SourceDTO[]) {
+  const options = new Map(sourceOptions.value.map(item => [item.id, item]))
+  items.forEach(item => options.set(item.id, { ...item, display_title: item.title || item.publisher || item.url }))
+  sourceOptions.value = [...options.values()]
 }
 function isSongSinger(value: string): value is SongSinger { return SONG_SINGERS.includes(value as SongSinger) }
 function searchProducers(value: string) { void loadProducerOptions(value?.trim() || undefined) }
@@ -243,6 +338,13 @@ function localInputToIso(value: string): string | null { return value ? new Date
 .editor-header h2 { margin: 4px 0 0; font-size: 1.5rem; }
 .editor-form { padding: 24px 26px; display: grid; gap: 14px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.tour-sources-section { display: grid; gap: 14px; margin-top: 8px; padding-top: 22px; border-top: 1px solid var(--site-border); }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.section-heading h3 { margin: 3px 0 2px; font-size: 1.12rem; }
+.section-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.relation-state { min-height: 72px; padding: 20px; border: 1px dashed var(--site-border); border-radius: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--site-muted); }
+.source-list { display: grid; gap: 10px; }
+.source-row { padding: 12px; border: 1px solid var(--site-border); border-radius: 14px; display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(130px, 1fr) auto minmax(140px, 1fr) auto; gap: 8px; align-items: start; }
 .editor-actions { position: sticky; bottom: 0; margin: 12px -26px -24px; padding: 16px 26px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--site-border); background: rgb(var(--v-theme-surface)); }
-@media (max-width: 620px) { .editor-header, .editor-form { padding-inline: 18px; } .form-grid { grid-template-columns: 1fr; } .editor-actions { margin-inline: -18px; padding-inline: 18px; } }
+@media (max-width: 620px) { .editor-header, .editor-form { padding-inline: 18px; } .form-grid, .source-row { grid-template-columns: 1fr; } .section-heading { flex-direction: column; } .section-actions { justify-content: flex-start; } .editor-actions { margin-inline: -18px; padding-inline: 18px; } }
 </style>
