@@ -48,9 +48,17 @@
 
         <div v-else class="knowledge-table-wrap" :aria-busy="loading">
           <v-table class="knowledge-table" hover>
-            <thead><tr><th>{{ currentConfig.primaryColumn }}</th><th>{{ currentConfig.secondaryColumn }}</th><th>状态</th><th>更新时间</th><th class="actions-column">操作</th></tr></thead>
+            <thead><tr><th v-if="section === 'songs'" class="vocalist-column"><span class="sr-only">歌手颜色</span></th><th>{{ currentConfig.primaryColumn }}</th><th>{{ currentConfig.secondaryColumn }}</th><th>状态</th><th>更新时间</th><th class="actions-column">操作</th></tr></thead>
             <tbody>
               <tr v-for="item in items" :key="`${section}-${item.id}`">
+                <td v-if="section === 'songs'" class="vocalist-column">
+                  <span class="vocalist-marker" role="img" :aria-label="vocalistColorLabel(item)">
+                    <span
+                      v-for="color in vocalistColors(item)" :key="color"
+                      class="vocalist-marker-segment" :style="{ backgroundColor: `var(--vocalist-${color})` }"
+                    />
+                  </span>
+                </td>
                 <td><div class="primary-cell"><strong>{{ primaryText(item) }}</strong><span>{{ itemSlug(item) }}</span></div></td>
                 <td>{{ secondaryText(item) }}</td>
                 <td><v-chip size="small" variant="tonal" :color="statusColor(item)">{{ statusText(item) }}</v-chip></td>
@@ -129,9 +137,19 @@ import {
 
 type KnowledgeRecord = EventDTO | TourDTO | VenueDTO | SongDTO | SourceDTO
 type ReferenceRecord = TourDTO | VenueDTO | SongDTO | SourceDTO
+type VocalistColor = 'miku' | 'rin' | 'len' | 'luka' | 'meiko' | 'kaito' | 'teto' | 'other'
 interface SectionConfig { value: ConcertResource; label: string; singular: string; icon: string; primaryColumn: string; secondaryColumn: string; searchPlaceholder: string }
 
 const PAGE_SIZE = 20
+const vocalistColorMap: Readonly<Record<string, VocalistColor>> = {
+  '初音ミク': 'miku',
+  '鏡音リン': 'rin',
+  '鏡音レン': 'len',
+  '巡音ルカ': 'luka',
+  MEIKO: 'meiko',
+  KAITO: 'kaito',
+  '重音テト': 'teto',
+}
 const sections: SectionConfig[] = [
   { value: 'events', label: '演出场次', singular: '场次', icon: 'mdi-calendar-star-outline', primaryColumn: '场次', secondaryColumn: '日期 / 城市', searchPlaceholder: '搜索场次名称、城市或 slug' },
   { value: 'tours', label: '巡演', singular: '巡演', icon: 'mdi-map-marker-path', primaryColumn: '巡演', secondaryColumn: '日期 / 主办方', searchPlaceholder: '搜索巡演名称、主办方或 slug' },
@@ -177,6 +195,10 @@ const filterItems = computed(() => {
 })
 
 useSeoMeta({ title: '资料库维护 · Ivan1105' })
+useHead(() => ({
+  htmlAttrs: { class: editorOpen.value ? 'knowledge-editor-open' : undefined },
+  bodyAttrs: { class: editorOpen.value ? 'knowledge-editor-open' : undefined },
+}))
 
 watch(() => route.query.section, (value) => {
   const next = parseSection(value)
@@ -330,6 +352,16 @@ function secondaryText(item: KnowledgeRecord): string {
   if ('url' in item) return [item.publisher, item.url].filter(Boolean).join(' · ')
   return '—'
 }
+function vocalistColors(item: KnowledgeRecord): VocalistColor[] {
+  if (!('producer' in item) || !item.singer?.trim()) return ['other']
+  const colors = item.singer
+    .split(/[、,，/]+/)
+    .map(singer => vocalistColorMap[singer.trim()] ?? 'other')
+  return [...new Set(colors)]
+}
+function vocalistColorLabel(item: KnowledgeRecord): string {
+  return 'producer' in item && item.singer?.trim() ? `歌手颜色：${item.singer}` : '歌手颜色：其他或未设置'
+}
 function statusText(item: KnowledgeRecord): string {
   if ('event_type' in item) return `${eventTypeLabels[item.event_type]} · ${eventStatusLabels[item.status]}`
   if ('organizer' in item) return tourStatusLabels[item.status]
@@ -371,6 +403,9 @@ function handleApiError(caught: unknown, fallback: string) {
 .knowledge-table-wrap { overflow-x: auto; }
 .knowledge-table { min-width: 820px; }
 .knowledge-table th { white-space: nowrap; color: var(--site-muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .07em; }
+.vocalist-column { width: 28px; min-width: 28px; padding: 0 0 0 12px !important; }
+.vocalist-marker { width: 8px; height: 38px; overflow: hidden; display: flex; flex-direction: column; border-radius: 999px; box-shadow: 0 0 0 1px rgb(24 59 56 / 8%); }
+.vocalist-marker-segment { min-height: 4px; flex: 1; }
 .primary-cell { min-width: 210px; display: grid; gap: 3px; }
 .primary-cell span { color: var(--site-muted); font-size: .75rem; }
 .actions-column { width: 152px; white-space: nowrap; text-align: right !important; }

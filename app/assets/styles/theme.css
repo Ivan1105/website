@@ -18,10 +18,24 @@
   --site-space-3: 24px;
   --site-space-4: 32px;
   --site-space-5: 48px;
+  --vocalist-miku: #39c5bb;
+  --vocalist-rin: #f3981d;
+  --vocalist-len: #d6ad00;
+  --vocalist-luka: #d95f9d;
+  --vocalist-meiko: #c9474d;
+  --vocalist-kaito: #356bc4;
+  --vocalist-teto: #a94261;
+  --vocalist-other: #879291;
 }
 
 html {
   scroll-padding-top: calc(var(--site-nav-height) + 16px);
+}
+
+html.knowledge-editor-open,
+body.knowledge-editor-open {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
