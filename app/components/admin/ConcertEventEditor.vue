@@ -70,7 +70,9 @@
               <div class="setlist-fields">
                 <v-autocomplete
                   v-model="item.song_id" label="标准歌曲" :items="songOptions" item-title="title" item-value="id"
-                  density="compact" clearable no-data-text="noData.songs" :loading="optionLoading.songs" @update:search="searchSongs"
+                  density="compact" clearable :custom-key-filter="songCustomKeyFilter" :filter-keys="songFilterKeys"
+                  no-data-text="noData.songs" :loading="optionLoading.songs"
+                  @update:menu="handleSongMenuUpdate" @update:search="searchSongs"
                 />
                 <v-text-field v-model.trim="item.version_label" label="版本" density="compact" />
                 <v-select v-model="item.confidence" label="确认级别" :items="confidenceItems" density="compact" />
@@ -108,7 +110,9 @@
 </template>
 
 <script setup lang="ts">
+import { useTimer } from '@vuetify/v0'
 import { VueDraggable } from 'vue-draggable-plus'
+import type { FilterFunction } from 'vuetify'
 import {
   isApiError,
   useConcertAdminApi,
@@ -147,6 +151,13 @@ const setlist = ref<EditableSetlistItem[]>([])
 const tourOptions = ref<TourDTO[]>([])
 const venueOptions = ref<VenueDTO[]>([])
 const songOptions = ref<SongDTO[]>([])
+const visibleSongIds = shallowRef<ReadonlySet<number>>(new Set())
+const songFilterKeys = ['title']
+const filterVisibleSong: FilterFunction = (_value, _query, item) => {
+  const song = item?.raw as unknown
+  return isSongOption(song) && visibleSongIds.value.has(song.id)
+}
+const songCustomKeyFilter: Record<string, FilterFunction> = { title: filterVisibleSong }
 const optionLoading = reactive({ tours: false, venues: false, songs: false })
 const relationsLoading = ref(false)
 const relationsLoadFailed = ref(false)
@@ -155,7 +166,13 @@ const error = ref<string | null>(null)
 const success = ref<string | null>(null)
 const baseline = ref('')
 const optionRequest = reactive({ tours: 0, venues: 0, songs: 0 })
+const pendingSongSearch = shallowRef<string | undefined>()
 let resetVersion = 0
+
+const SONG_SEARCH_DEBOUNCE_MS = 300
+const songSearchTimer = useTimer(() => {
+  void loadSongs(pendingSongSearch.value)
+}, { duration: SONG_SEARCH_DEBOUNCE_MS })
 
 const eventTypeItems = enumItems(eventTypeLabels)
 const eventStatusItems = enumItems(eventStatusLabels)
@@ -188,9 +205,12 @@ const timePreview = computed(() => timeState.value.start
 
 watch(() => [props.record, props.copySource] as const, reset, { immediate: true })
 watch([form, setlist], () => emit('dirty-change', snapshot() !== baseline.value), { deep: true })
+onBeforeUnmount(() => songSearchTimer.stop())
 
 async function reset() {
   const version = ++resetVersion
+  songSearchTimer.stop()
+  pendingSongSearch.value = undefined
   currentEvent.value = props.record
   Object.assign(form, emptyForm())
   setlist.value = []
@@ -304,10 +324,23 @@ function toSetlistInput(item: EditableSetlistItem): SetlistItemInput { return { 
 
 async function loadTours(q?: string) { await loadOption('tours', () => concertAdminApi.listTours({ page_size: 50, q }), result => mergeOptions(tourOptions, result.items)) }
 async function loadVenues(q?: string) { await loadOption('venues', () => concertAdminApi.listVenues({ page_size: 50, q }), result => mergeOptions(venueOptions, result.items)) }
-async function loadSongs(q?: string) { await loadOption('songs', () => concertAdminApi.listSongs({ page_size: 50, q }), result => mergeOptions(songOptions, result.items)) }
+async function loadSongs(q?: string) {
+  await loadOption('songs', () => concertAdminApi.listSongs({ page_size: 50, q }), (result) => {
+    visibleSongIds.value = new Set(result.items.map(song => song.id))
+    mergeOptions(songOptions, result.items)
+  })
+}
 function searchTours(value: string) { void loadTours(value?.trim() || undefined) }
 function searchVenues(value: string) { void loadVenues(value?.trim() || undefined) }
-function searchSongs(value: string) { void loadSongs(value?.trim() || undefined) }
+function searchSongs(value: string) {
+  pendingSongSearch.value = value?.trim() || undefined
+  visibleSongIds.value = new Set()
+  songSearchTimer.stop()
+  songSearchTimer.start()
+}
+function handleSongMenuUpdate(open: boolean) {
+  if (open) void loadSongs()
+}
 
 async function loadOption<K extends keyof typeof optionLoading, T>(key: K, operation: () => Promise<T>, apply: (result: T) => void) {
   const request = ++optionRequest[key]
@@ -315,6 +348,9 @@ async function loadOption<K extends keyof typeof optionLoading, T>(key: K, opera
   try { const result = await operation(); if (request === optionRequest[key]) apply(result) } catch { /* 表单仍可继续编辑 */ } finally { if (request === optionRequest[key]) optionLoading[key] = false }
 }
 function mergeOptions<T extends { id: number }>(target: Ref<T[]>, incoming: T[]) { const map = new Map(target.value.map(item => [item.id, item])); incoming.forEach(item => map.set(item.id, item)); target.value = [...map.values()] }
+function isSongOption(value: unknown): value is Pick<SongDTO, 'id'> {
+  return typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'number'
+}
 function snapshot() { return JSON.stringify({ form, setlist: setlist.value.map(({ key: _key, ...item }) => item) }) }
 function markClean(version = resetVersion) { nextTick(() => { if (version !== resetVersion) return; baseline.value = snapshot(); emit('dirty-change', false) }) }
 function markUnsavedCopy(version: number) { nextTick(() => { if (version !== resetVersion) return; baseline.value = '__unsaved_copy__'; emit('dirty-change', true) }) }
