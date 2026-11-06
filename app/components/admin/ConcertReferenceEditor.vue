@@ -1,7 +1,7 @@
 <template>
   <div class="reference-editor">
     <header class="editor-header">
-      <div><p class="eyebrow">{{ resourceEyebrow }}</p><h2>{{ record ? `编辑${resourceLabel}` : `新增${resourceLabel}` }}</h2></div>
+      <div><p class="eyebrow">{{ resourceEyebrow }}</p><h2>{{ hasCurrentRecord ? `编辑${resourceLabel}` : `新增${resourceLabel}` }}</h2></div>
       <v-btn icon="mdi-close" variant="text" aria-label="关闭编辑器" :disabled="saving" @click="$emit('cancel')" />
     </header>
 
@@ -80,6 +80,10 @@
           <v-select v-model="form.status" label="状态" :items="songStatusItems" />
         </div>
         <v-textarea v-model="form.notes" label="备注" rows="4" auto-grow />
+        <SongCallbookEditor
+          :song-id="currentSong?.id ?? null" :song-title="currentSong?.title || form.title || '未命名歌曲'"
+          @dirty-change="setCallbookDirty"
+        />
       </template>
 
       <template v-else>
@@ -98,13 +102,18 @@
 
       <footer class="editor-actions">
         <v-btn variant="text" :disabled="saving" @click="$emit('cancel')">取消</v-btn>
-        <v-btn type="submit" color="primary" :loading="saving" :disabled="relationsLoading || relationsLoadFailed" prepend-icon="mdi-content-save-outline">{{ resource === 'tours' && !currentTour ? '保存并继续编辑' : '保存' }}</v-btn>
+        <v-btn
+          type="submit" color="primary" :loading="saving"
+          :disabled="resource === 'tours' && (relationsLoading || relationsLoadFailed)"
+          prepend-icon="mdi-content-save-outline"
+        >{{ (resource === 'tours' && !currentTour) || (resource === 'songs' && !currentSong) ? '保存并继续编辑' : '保存' }}</v-btn>
       </footer>
     </v-form>
   </div>
 </template>
 
 <script setup lang="ts">
+import SongCallbookEditor from './SongCallbookEditor.vue'
 import {
   SONG_SINGERS,
   useConcertAdminApi,
@@ -142,7 +151,10 @@ const { concertAdminApi } = useConcertAdminApi()
 const saving = ref(false)
 const error = ref<string | null>(null)
 const baseline = ref('')
+const baseDirty = ref(false)
+const callbookDirty = ref(false)
 const currentTour = ref<TourDTO | null>(null)
+const currentSong = ref<SongDTO | null>(null)
 const tourSources = ref<EditableTourSource[]>([])
 const sourceOptions = ref<SourceOption[]>([])
 const relationsLoading = ref(false)
@@ -158,6 +170,7 @@ const form = reactive<ReferenceFormState>(emptyForm())
 const labels: Record<ReferenceResource, string> = { tours: '巡演', venues: '场地', songs: '歌曲', sources: '资料来源' }
 const resourceLabel = computed(() => labels[props.resource])
 const resourceEyebrow = computed(() => props.resource.toUpperCase())
+const hasCurrentRecord = computed(() => props.resource === 'tours' ? !!currentTour.value : props.resource === 'songs' ? !!currentSong.value : !!props.record)
 const requiredRules = [(value: string) => !!value?.trim() || '此项为必填']
 const slugRules = [
   ...requiredRules,
@@ -172,7 +185,10 @@ const sourceReliabilityItems = enumItems(sourceReliabilityLabels)
 const sourceRelationItems = enumItems(sourceRelationLabels)
 
 watch(() => [props.resource, props.record] as const, reset, { immediate: true })
-watch([form, tourSources], () => emit('dirty-change', snapshot() !== baseline.value), { deep: true })
+watch([form, tourSources], () => {
+  baseDirty.value = snapshot() !== baseline.value
+  emitDirty()
+}, { deep: true })
 
 function emptyForm(): ReferenceFormState {
   return {
@@ -189,6 +205,9 @@ async function reset() {
   const next = emptyForm()
   const record = props.record
   currentTour.value = props.resource === 'tours' && record && 'name' in record ? record as TourDTO : null
+  currentSong.value = props.resource === 'songs' && record && 'producer' in record ? record as SongDTO : null
+  baseDirty.value = false
+  callbookDirty.value = false
   tourSources.value = []
   relationsLoading.value = false
   relationsLoadFailed.value = false
@@ -205,7 +224,8 @@ async function reset() {
   error.value = null
   nextTick(() => {
     baseline.value = snapshot()
-    emit('dirty-change', false)
+    baseDirty.value = false
+    emitDirty()
   })
   if (props.resource === 'songs') void loadProducerOptions()
   if (props.resource === 'tours') {
@@ -246,7 +266,7 @@ async function save() {
         producer: toNullable(form.producer), status: form.status as SongDTO['status'],
         notes: toNullable(form.notes),
       }
-      saved = props.record ? await concertAdminApi.updateSong(props.record.id, input) : await concertAdminApi.createSong(input)
+      saved = currentSong.value ? await concertAdminApi.updateSong(currentSong.value.id, input) : await concertAdminApi.createSong(input)
     } else {
       const input = {
         url: form.url.trim(), title: toNullable(form.title), publisher: toNullable(form.publisher),
@@ -267,8 +287,10 @@ async function save() {
         }))
       }
     }
+    if (props.resource === 'songs') currentSong.value = saved as SongDTO
     baseline.value = snapshot()
-    emit('dirty-change', false)
+    baseDirty.value = false
+    emitDirty()
     emit('saved', saved)
   } catch (caught) {
     error.value = isApiError(caught) ? caught.message : caught instanceof Error ? caught.message : '保存失败，请稍后重试。'
@@ -285,7 +307,9 @@ function addTourSource() { tourSources.value.push({ key: crypto.randomUUID(), so
 function toTourSourceInput(item: EditableTourSource): TourSourceInput { return { source_id: item.source_id!, relation_type: item.relation_type, is_primary: item.is_primary, note: toNullable(item.note) } }
 function hasDuplicatePrimarySources() { const types = tourSources.value.filter(item => item.is_primary).map(item => item.relation_type); return new Set(types).size !== types.length }
 function snapshot() { return JSON.stringify({ form, tourSources: tourSources.value.map(({ key: _key, ...item }) => item) }) }
-function markClean() { nextTick(() => { baseline.value = snapshot(); emit('dirty-change', false) }) }
+function setCallbookDirty(value: boolean) { callbookDirty.value = value; emitDirty() }
+function emitDirty() { emit('dirty-change', baseDirty.value || callbookDirty.value) }
+function markClean() { nextTick(() => { baseline.value = snapshot(); baseDirty.value = false; emitDirty() }) }
 async function loadTourSources(tourId: number, version: number) {
   relationsLoading.value = true
   try {

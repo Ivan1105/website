@@ -273,7 +273,7 @@ function handleReferenceSaved(record: ReferenceRecord) {
   successOpen.value = true
   dirty.value = false
   if (section.value === 'tours') editingRecord.value = record
-  else {
+  else if (section.value !== 'songs') {
     editorOpen.value = false
     editingRecord.value = null
   }

@@ -101,6 +101,7 @@ export interface SongDTO extends BaseConcertDTO {
   producer: string | null
   status: SongStatus
   notes: string | null
+  callbook_count: number
 }
 
 export interface SongInput {
@@ -111,6 +112,25 @@ export interface SongInput {
   producer?: string | null
   status?: SongStatus
   notes?: string | null
+}
+
+export interface CallbookPageDTO extends BaseConcertDTO {
+  callbook_id: number
+  page_no: number
+  image_reference: string
+}
+
+export interface CallbookDTO extends BaseConcertDTO {
+  song_id: number
+  song_title: string
+  metadata_text: string
+  source: string
+  pages: CallbookPageDTO[]
+}
+
+export interface CallbookPatch {
+  metadata_text: string
+  source: string
 }
 
 export interface SourceDTO extends BaseConcertDTO {
@@ -265,6 +285,8 @@ export const useConcertAdminApi = () => {
     createSong: (input: SongInput) => post<SongDTO>(`${base}/songs`, input),
     updateSong: (id: number, input: Partial<SongInput>) => patch<SongDTO>(`${base}/songs/${encodeId(id)}`, input),
     deleteSong: (id: number) => remove(`${base}/songs/${encodeId(id)}`),
+    getSongCallbooks: (id: number) => get<CallbookDTO[]>(`${base}/songs/${encodeId(id)}/callbooks`),
+    updateCallbook: (id: number, input: CallbookPatch) => patch<CallbookDTO>(`${base}/callbooks/${encodeId(id)}`, input),
 
     listSources: (query: ListQuery = {}) => get<ConcertPageDTO<SourceDTO>>(`${base}/sources`, query),
     getSource: (id: number) => get<SourceDTO>(`${base}/sources/${encodeId(id)}`),

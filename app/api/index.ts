@@ -28,6 +28,9 @@ export {
 } from './concert-admin'
 export type {
   BaseConcertDTO,
+  CallbookDTO,
+  CallbookPageDTO,
+  CallbookPatch,
   ConcertPageDTO,
   ConcertPaginationDTO,
   ConcertResource,
