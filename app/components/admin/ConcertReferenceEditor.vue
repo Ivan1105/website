@@ -60,9 +60,10 @@
         </div>
         <v-text-field v-model.trim="form.address" label="详细地址" />
         <div class="form-grid">
-          <v-text-field v-model.number="form.latitude" label="纬度" type="number" step="0.0000001" />
-          <v-text-field v-model.number="form.longitude" label="经度" type="number" step="0.0000001" />
+          <v-text-field v-model.number="form.latitude" label="纬度" type="number" step="0.0000001" min="-90" max="90" />
+          <v-text-field v-model.number="form.longitude" label="经度" type="number" step="0.0000001" min="-180" max="180" />
         </div>
+        <VenueMapPicker v-model:latitude="form.latitude" v-model:longitude="form.longitude" :name="form.name" />
         <v-text-field v-model.trim="form.official_url" label="官方网站" type="url" />
       </template>
 
@@ -114,6 +115,7 @@
 
 <script setup lang="ts">
 import SongCallbookEditor from './SongCallbookEditor.vue'
+import VenueMapPicker from './VenueMapPicker.vue'
 import {
   SONG_SINGERS,
   useConcertAdminApi,

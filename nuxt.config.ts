@@ -91,6 +91,12 @@ export default defineNuxtConfig({
       // 会被 NUXT_PUBLIC_API_BASE 环境变量自动覆盖
       apiUrl: '',
       ossUrl: '',
+      amap: {
+        // 由 NUXT_PUBLIC_AMAP_KEY / NUXT_PUBLIC_AMAP_SECURITY_JS_CODE / NUXT_PUBLIC_AMAP_SERVICE_HOST 覆盖
+        key: '',
+        securityJsCode: '',
+        serviceHost: '',
+      },
       firebase: {
         apiKey: '',
         authDomain: '',
