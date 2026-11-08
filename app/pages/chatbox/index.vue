@@ -144,6 +144,22 @@
                     <p v-else-if="msg.role === 'user'" class="message-text">{{ msg.content }}</p>
                     <template v-else>
                       <div v-if="msg.content" class="message-text markdown-content" v-html="renderAssistantMessage(msg)" />
+                      <section v-if="msg.sources?.length" class="message-sources" aria-label="参考来源">
+                        <div class="message-sources-heading">
+                          <v-icon icon="mdi-link-variant" size="16" aria-hidden="true" />
+                          <span>参考来源</span>
+                        </div>
+                        <div class="message-sources-list">
+                          <a v-for="source in msg.sources" :key="source.url" :href="source.url"
+                            class="message-source" target="_blank" rel="noopener noreferrer">
+                            <span class="message-source-copy">
+                              <span class="message-source-title">{{ source.title }}</span>
+                              <span class="message-source-domain">{{ sourceHostname(source.url) }}</span>
+                            </span>
+                            <v-icon icon="mdi-open-in-new" size="15" aria-hidden="true" />
+                          </a>
+                        </div>
+                      </section>
                       <div v-if="msg.toolCalls?.length" class="tool-status-list" aria-live="polite">
                         <div v-for="toolCall in msg.toolCalls" :key="toolCall.id" class="tool-status"
                           :class="`tool-status-${toolCall.status}`" role="status"
@@ -702,7 +718,7 @@
 </template>
 
 <script setup lang="ts">
-import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type ImapSubscriptionData, type ImapSubscriptionStatus, type MailAccountDTO, type MailEndpointDTO, type MessageDTO, type OAuthServiceDTO, type OutlookSubscriptionData, type OutlookSubscriptionStatus, type UpdateImapConfigReq } from '@/api'
+import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type ImapSubscriptionData, type ImapSubscriptionStatus, type MailAccountDTO, type MailEndpointDTO, type MessageDTO, type MessageSourceDTO, type OAuthServiceDTO, type OutlookSubscriptionData, type OutlookSubscriptionStatus, type UpdateImapConfigReq } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
 import { useDisplay } from 'vuetify'
@@ -751,15 +767,50 @@ interface ToolCallState {
   name: string
   status: ToolCallStatus
 }
-type Message = Omit<MessageDTO, 'id' | 'role'> & {
+type Message = Omit<MessageDTO, 'id' | 'role' | 'sources'> & {
   key: string
   id?: string
   role: MessageDTO['role'] | 'stream-error'
+  sources?: MessageSourceDTO[]
   loading?: boolean
   toolCalls?: ToolCallState[]
 }
+const normalizeMessageSource = (source: MessageSourceDTO): MessageSourceDTO | null => {
+  if (!source.id?.trim() || !source.title?.trim() || !source.url?.trim()) return null
+  try {
+    const url = new URL(source.url)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return {
+      id: source.id.trim(),
+      title: source.title.trim(),
+      url: url.href,
+    }
+  } catch {
+    return null
+  }
+}
+const normalizeMessageSources = (sources: MessageSourceDTO[] | undefined): MessageSourceDTO[] => {
+  const normalized: MessageSourceDTO[] = []
+  const seen = new Set<string>()
+  for (const source of sources ?? []) {
+    const validSource = normalizeMessageSource(source)
+    if (!validSource) continue
+    if (seen.has(validSource.url)) continue
+    seen.add(validSource.url)
+    normalized.push(validSource)
+  }
+  return normalized
+}
+const sourceHostname = (url: string) => {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
 const toHistoryMessage = (message: MessageDTO | ActiveRunDTO['user_message']): Message => ({
   ...message,
+  sources: 'sources' in message ? normalizeMessageSources(message.sources) : [],
   key: `history:${message.id}`,
 })
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -1760,6 +1811,7 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
   placeholder.content = ''
   placeholder.loading = true
   placeholder.toolCalls = []
+  placeholder.sources = []
   activeStreamMessageKeys.add(replyKey)
 
   const initializedMessageKeys = new Set<string>()
@@ -1767,6 +1819,7 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
   let messageOrdinal = 0
   let currentStreamMessageKey: string | null = null
   let hasSeenMessageStart = false
+  const messageKeysByServerId = new Map<string, string>()
 
   const ensureStreamMessage = (ordinal: number) => {
     const messageKey = `run:${runId}:message:${ordinal}`
@@ -1793,6 +1846,7 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
         createdAt: new Date().toISOString(),
         loading: true,
         toolCalls: [],
+        sources: [],
       }
       currentMessages.value.push(message)
     }
@@ -1801,6 +1855,7 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
       message.content = ''
       message.loading = true
       message.toolCalls = []
+      message.sources = []
       initializedMessageKeys.add(messageKey)
       activeStreamMessageKeys.add(messageKey)
     }
@@ -1820,7 +1875,7 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
     return message
   }
 
-  const activateNextMessage = () => {
+  const activateNextMessage = (serverMessageId: string) => {
     const previousMessage = currentStreamMessageKey
       ? currentMessages.value.find(item => item.key === currentStreamMessageKey)
       : null
@@ -1832,6 +1887,18 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
     if (previousMessage && previousMessage.key !== message.key) previousMessage.loading = false
     message.loading = true
     currentStreamMessageKey = message.key
+    messageKeysByServerId.set(serverMessageId, message.key)
+    return message
+  }
+
+  const ensureMessageForEvent = (serverMessageId: string) => {
+    const mappedKey = messageKeysByServerId.get(serverMessageId)
+    const mappedMessage = mappedKey
+      ? currentMessages.value.find(message => message.key === mappedKey)
+      : undefined
+    if (mappedMessage) return mappedMessage
+    const message = ensureCurrentStreamMessage()
+    messageKeysByServerId.set(serverMessageId, message.key)
     return message
   }
 
@@ -1859,12 +1926,23 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
     }
 
     if (event.type === 'message_start') {
-      activateNextMessage()
+      activateNextMessage(event.message_id)
     } else if (event.type === 'text') {
-      const message = ensureCurrentStreamMessage()
+      const message = ensureMessageForEvent(event.message_id)
       message.content += event.content
+    } else if (event.type === 'source') {
+      const source = normalizeMessageSource({
+        id: event.source_id,
+        title: event.title,
+        url: event.url,
+      })
+      if (source) {
+        const message = ensureMessageForEvent(event.message_id)
+        const exists = message.sources?.some(item => item.url === source.url)
+        if (!exists) (message.sources ??= []).push(source)
+      }
     } else if (event.type === 'tool_call') {
-      const message = ensureCurrentStreamMessage()
+      const message = ensureMessageForEvent(event.message_id)
       const existingToolCall = message.toolCalls?.find(item => item.id === event.tool_call_id)
       if (existingToolCall) {
         existingToolCall.name = event.tool_name
@@ -1873,7 +1951,7 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
         message.toolCalls?.push({ id: event.tool_call_id, name: event.tool_name, status: 'running' })
       }
     } else if (event.type === 'tool_result') {
-      const message = ensureCurrentStreamMessage()
+      const message = ensureMessageForEvent(event.message_id)
       const status: ToolCallStatus = event.is_error ? 'error' : 'success'
       const existingToolCall = message.toolCalls?.find(item => item.id === event.tool_call_id)
       if (existingToolCall) {
@@ -1894,7 +1972,7 @@ const streamActiveRun = async (runId: string, replyKey: string, threadId: string
   } catch (error) {
     if (currentStreamVersion === streamVersion && !controller.signal.aborted) {
       currentMessages.value = currentMessages.value.filter(message => (
-        !activeStreamMessageKeys.has(message.key) || message.content.trim().length > 0
+        !activeStreamMessageKeys.has(message.key) || message.content.trim().length > 0 || Boolean(message.sources?.length)
       ))
       if (!handleUnauthorized(error)) showError('回复连接中断，刷新页面可继续获取。')
     }
@@ -3209,6 +3287,77 @@ onBeforeUnmount(() => {
   border: 0;
   border-top: 1px solid var(--site-border);
   margin-block: 16px;
+}
+
+.message-sources {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, #39c5bb 28%, transparent);
+}
+
+.message-sources-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: #258f88;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.message-sources-list {
+  display: grid;
+  gap: 7px;
+}
+
+.message-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  color: inherit;
+  text-decoration: none;
+  background: color-mix(in srgb, #39c5bb 8%, transparent);
+  border: 1px solid color-mix(in srgb, #39c5bb 24%, transparent);
+  border-radius: 9px;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.message-source:hover {
+  background: color-mix(in srgb, #39c5bb 14%, transparent);
+  border-color: color-mix(in srgb, #39c5bb 48%, transparent);
+}
+
+.message-source:focus-visible {
+  outline: 2px solid #39c5bb;
+  outline-offset: 2px;
+}
+
+.message-source-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.message-source-title {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.message-source-domain {
+  color: var(--site-muted);
+  font-size: 0.66rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.message-source > .v-icon {
+  flex-shrink: 0;
+  color: #258f88;
 }
 
 .input-area {

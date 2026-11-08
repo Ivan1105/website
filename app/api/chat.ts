@@ -15,6 +15,13 @@ export interface MessageDTO {
   role: 'user' | 'assistant' | 'signal'
   content: string
   createdAt: string
+  sources: MessageSourceDTO[]
+}
+
+export interface MessageSourceDTO {
+  id: string
+  title: string
+  url: string
 }
 
 export interface MessagePaginationDTO {
@@ -83,6 +90,15 @@ export interface ChatRunTextEvent {
   content: string
 }
 
+export interface ChatRunSourceEvent {
+  type: 'source'
+  run_id: string
+  message_id: string
+  source_id: string
+  title: string
+  url: string
+}
+
 export interface ChatRunToolCallEvent {
   type: 'tool_call'
   run_id: string
@@ -114,6 +130,7 @@ export interface ChatRunErrorEvent {
 export type ChatRunStreamEvent =
   | ChatRunMessageStartEvent
   | ChatRunTextEvent
+  | ChatRunSourceEvent
   | ChatRunToolCallEvent
   | ChatRunToolResultEvent
   | ChatRunDoneEvent
@@ -131,14 +148,24 @@ export const useChatApi = () => {
     },
 
     async getMessages(threadId: string, page = 0, pageSize = 20): Promise<QueryMessagesDTO> {
-      const resp = await $api<QueryMessagesDTO | Envelope<QueryMessagesDTO>>(`/chatbox/queryMessages/${encodeURIComponent(threadId)}`, {
+      type QueryMessagesWireDTO = Omit<QueryMessagesDTO, 'messages'> & {
+        messages: Array<Omit<MessageDTO, 'sources'> & { sources?: MessageSourceDTO[] }>
+      }
+      const resp = await $api<QueryMessagesWireDTO | Envelope<QueryMessagesWireDTO>>(`/chatbox/queryMessages/${encodeURIComponent(threadId)}`, {
         method: 'GET',
         query: {
           page,
           page_size: pageSize,
         },
       })
-      return unwrap(resp)
+      const result = unwrap(resp)
+      return {
+        ...result,
+        messages: result.messages.map(message => ({
+          ...message,
+          sources: Array.isArray(message.sources) ? message.sources : [],
+        })),
+      }
     },
 
     async createThread(agentName: string): Promise<CreateThreadDTO> {
@@ -231,7 +258,7 @@ export const useChatApi = () => {
 
         if (!currentEventName && !chunk) return
         if (currentEventName === 'ping') return
-        if (!['message_start', 'text', 'tool_call', 'tool_result', 'done', 'error'].includes(currentEventName)) return
+        if (!['message_start', 'text', 'source', 'tool_call', 'tool_result', 'done', 'error'].includes(currentEventName)) return
 
         let payload: unknown
         try {
@@ -267,6 +294,16 @@ export const useChatApi = () => {
               run_id: eventRunId,
               message_id: requireString(event, 'message_id', payload),
               content: event.content,
+            })
+            break
+          case 'source':
+            onEvent({
+              type: currentEventName,
+              run_id: eventRunId,
+              message_id: requireString(event, 'message_id', payload),
+              source_id: requireString(event, 'source_id', payload),
+              title: requireString(event, 'title', payload),
+              url: requireString(event, 'url', payload),
             })
             break
           case 'tool_call':
