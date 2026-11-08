@@ -50,6 +50,7 @@ export interface TourDTO extends BaseConcertDTO {
   status: TourStatus
   confidence: Confidence
   notes: string | null
+  event_count?: number
 }
 
 export interface TourInput {

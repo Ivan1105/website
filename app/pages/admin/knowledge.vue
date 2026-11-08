@@ -18,6 +18,14 @@
           <v-tab v-for="item in sections" :key="item.value" :value="item.value"><v-icon :icon="item.icon" start />{{ item.label }}</v-tab>
         </v-tabs>
 
+        <v-alert
+          v-if="section === 'events' && selectedTourId" class="tour-context" color="secondary"
+          icon="mdi-map-marker-path" variant="tonal" density="compact"
+        >
+          正在查看「{{ selectedTourLabel }}」的场次
+          <template #append><v-btn variant="text" size="small" @click="clearTourFilter">查看全部场次</v-btn></template>
+        </v-alert>
+
         <div class="knowledge-toolbar">
           <v-text-field
             v-model.trim="search" label="搜索" prepend-inner-icon="mdi-magnify" hide-details clearable
@@ -48,7 +56,7 @@
 
         <div v-else class="knowledge-table-wrap" :aria-busy="loading">
           <v-table class="knowledge-table" hover>
-            <thead><tr><th v-if="section === 'songs'" class="vocalist-column"><span class="sr-only">歌手颜色</span></th><th>{{ currentConfig.primaryColumn }}</th><th>{{ currentConfig.secondaryColumn }}</th><th>状态</th><th>更新时间</th><th class="actions-column">操作</th></tr></thead>
+            <thead><tr><th v-if="section === 'songs'" class="vocalist-column"><span class="sr-only">歌手颜色</span></th><th>{{ currentConfig.primaryColumn }}</th><th>{{ currentConfig.secondaryColumn }}</th><th>状态</th><th class="actions-column">操作</th></tr></thead>
             <tbody>
               <tr v-for="item in items" :key="`${section}-${item.id}`">
                 <td v-if="section === 'songs'" class="vocalist-column">
@@ -59,10 +67,20 @@
                     />
                   </span>
                 </td>
-                <td><div class="primary-cell"><strong>{{ primaryText(item) }}</strong><span>{{ itemSlug(item) }}</span></div></td>
+                <td>
+                  <div class="primary-cell">
+                    <a
+                      v-if="isTour(item)" :href="tourEventsHref(item)" class="tour-name-link"
+                      @click.prevent="openTourEvents(item)"
+                    >
+                      {{ primaryText(item) }}
+                    </a>
+                    <strong v-else>{{ primaryText(item) }}</strong>
+                    <span>{{ itemSlug(item) }}</span>
+                  </div>
+                </td>
                 <td>{{ secondaryText(item) }}</td>
                 <td><v-chip size="small" variant="tonal" :color="statusColor(item)">{{ statusText(item) }}</v-chip></td>
-                <td>{{ formatTimestamp(item.updated_at) }}</td>
                 <td class="actions-column">
                   <v-btn
                     v-if="section === 'events'" icon="mdi-content-copy" variant="text" size="small"
@@ -131,7 +149,7 @@ import {
 } from '@/api'
 import { useAppStore } from '@/stores/app'
 import {
-  confidenceLabels, enumItems, eventStatusLabels, eventTypeLabels, formatDate, formatTimestamp,
+  confidenceLabels, enumItems, eventStatusLabels, eventTypeLabels, formatDate,
   songStatusLabels, sourceReliabilityLabels, sourceTypeLabels, tourStatusLabels,
 } from '@/utils/concert-admin'
 
@@ -151,8 +169,8 @@ const vocalistColorMap: Readonly<Record<string, VocalistColor>> = {
   '重音テト': 'teto',
 }
 const sections: SectionConfig[] = [
+  { value: 'tours', label: '巡演', singular: '巡演', icon: 'mdi-map-marker-path', primaryColumn: '巡演', secondaryColumn: '日期 / 主办方 / 场次', searchPlaceholder: '搜索巡演名称、主办方或 slug' },
   { value: 'events', label: '演出场次', singular: '场次', icon: 'mdi-calendar-star-outline', primaryColumn: '场次', secondaryColumn: '日期 / 城市', searchPlaceholder: '搜索场次名称、城市或 slug' },
-  { value: 'tours', label: '巡演', singular: '巡演', icon: 'mdi-map-marker-path', primaryColumn: '巡演', secondaryColumn: '日期 / 主办方', searchPlaceholder: '搜索巡演名称、主办方或 slug' },
   { value: 'venues', label: '场地', singular: '场地', icon: 'mdi-stadium-outline', primaryColumn: '场地', secondaryColumn: '位置 / 时区', searchPlaceholder: '搜索场地、城市或 slug' },
   { value: 'songs', label: '歌曲', singular: '歌曲', icon: 'mdi-music-note-outline', primaryColumn: '歌曲', secondaryColumn: '创作者', searchPlaceholder: '搜索歌名、创作者或 slug' },
   { value: 'sources', label: '资料来源', singular: '来源', icon: 'mdi-link-variant', primaryColumn: '来源', secondaryColumn: '发布方 / URL', searchPlaceholder: '搜索标题、发布方或 URL' },
@@ -164,6 +182,8 @@ const appStore = useAppStore()
 const { mobile } = useDisplay()
 const { concertAdminApi } = useConcertAdminApi()
 const section = ref<ConcertResource>(parseSection(route.query.section))
+const selectedTourId = ref<number | null>(section.value === 'events' ? parseTourId(route.query.tour_id) : null)
+const selectedTourName = ref<string | null>(null)
 const items = ref<KnowledgeRecord[]>([])
 const pagination = ref<ConcertPaginationDTO>({ page: 0, page_size: PAGE_SIZE, total: 0, has_more: false })
 const search = ref('')
@@ -186,6 +206,7 @@ const successMessage = ref('保存成功')
 
 const currentConfig = computed(() => sections.find(item => item.value === section.value) ?? sections[0]!)
 const totalPages = computed(() => Math.max(1, Math.ceil(pagination.value.total / pagination.value.page_size)))
+const selectedTourLabel = computed(() => selectedTourName.value ?? `巡演 #${selectedTourId.value}`)
 const filterItems = computed(() => {
   if (section.value === 'events') return enumItems(eventStatusLabels)
   if (section.value === 'tours') return enumItems(tourStatusLabels)
@@ -200,19 +221,24 @@ useHead(() => ({
   bodyAttrs: { class: editorOpen.value ? 'knowledge-editor-open' : undefined },
 }))
 
-watch(() => route.query.section, (value) => {
-  const next = parseSection(value)
-  if (next === section.value) return
-  section.value = next
+watch(() => [route.query.section, route.query.tour_id] as const, ([sectionQuery, tourIdQuery]) => {
+  const nextSection = parseSection(sectionQuery)
+  const nextTourId = nextSection === 'events' ? parseTourId(tourIdQuery) : null
+  if (nextSection === section.value && nextTourId === selectedTourId.value) return
+  section.value = nextSection
+  selectedTourId.value = nextTourId
+  selectedTourName.value = null
   search.value = ''
   filter.value = null
   items.value = []
+  void loadSelectedTour()
   void loadItems(0)
 })
 watch(dirty, value => { if (!value) pendingRoute.value = null })
 
 onMounted(() => {
   window.addEventListener('beforeunload', beforeUnload)
+  void loadSelectedTour()
   void loadItems(0)
 })
 onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
@@ -229,6 +255,7 @@ async function loadItems(page: number) {
   error.value = null
   try {
     const query: Record<string, string | number | undefined> = { page, page_size: PAGE_SIZE, q: search.value || undefined }
+    if (section.value === 'events' && selectedTourId.value) query.tour_id = selectedTourId.value
     if (filter.value) {
       if (section.value === 'sources') query.source_type = filter.value
       else query.status = filter.value
@@ -251,6 +278,16 @@ function applyFilters() { void loadItems(0) }
 function clearSearch() { search.value = ''; void loadItems(0) }
 function openCreate() { editingRecord.value = null; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
 function openEdit(item: KnowledgeRecord) { editingRecord.value = item; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
+function tourEventsHref(tour: TourDTO): string { return `/admin/knowledge?section=events&tour_id=${tour.id}` }
+function openTourEvents(tour: TourDTO) {
+  runGuarded(() => {
+    editorOpen.value = false
+    editingRecord.value = null
+    copyingRecord.value = null
+    dirty.value = false
+    void router.push({ query: { ...route.query, section: 'events', tour_id: tour.id } })
+  })
+}
 function openCopy(item: KnowledgeRecord) {
   if (!('official_name' in item)) return
   editingRecord.value = null
@@ -263,14 +300,29 @@ function requestCloseEditor() { runGuarded(() => { editorOpen.value = false; edi
 
 function requestSection(value: string) {
   const next = parseSection(value)
-  if (next === section.value) return
+  if (next === section.value && selectedTourId.value === null) return
   runGuarded(() => {
     editorOpen.value = false
     editingRecord.value = null
     copyingRecord.value = null
     dirty.value = false
-    void router.replace({ query: { ...route.query, section: next } })
+    void router.push({ query: { ...route.query, section: next, tour_id: undefined } })
   })
+}
+
+function clearTourFilter() {
+  void router.push({ query: { ...route.query, section: 'events', tour_id: undefined } })
+}
+
+async function loadSelectedTour() {
+  const tourId = selectedTourId.value
+  if (!tourId) { selectedTourName.value = null; return }
+  try {
+    const tour = await concertAdminApi.getTour(tourId)
+    if (selectedTourId.value === tourId) selectedTourName.value = tour.name
+  } catch {
+    if (selectedTourId.value === tourId) selectedTourName.value = null
+  }
 }
 
 function runGuarded(action: () => void) {
@@ -343,10 +395,11 @@ function primaryText(item: KnowledgeRecord): string {
   if ('url' in item) return item.title || item.publisher || item.url
   return '未命名资料'
 }
+function isTour(item: KnowledgeRecord): item is TourDTO { return section.value === 'tours' && 'organizer' in item }
 function itemSlug(item: KnowledgeRecord): string { return 'slug' in item ? item.slug : `ID ${item.id}` }
 function secondaryText(item: KnowledgeRecord): string {
   if ('official_name' in item) return [formatDate(item.local_date), item.city].filter(Boolean).join(' · ')
-  if ('organizer' in item) return [[item.start_date, item.end_date].filter(Boolean).join(' — ') || '日期未设置', item.organizer].filter(Boolean).join(' · ')
+  if ('organizer' in item) return [[item.start_date, item.end_date].filter(Boolean).join(' — ') || '日期未设置', item.organizer, `共 ${item.event_count ?? 0} 场`].filter(Boolean).join(' · ')
   if ('timezone' in item && 'address' in item) return `${item.city}${item.prefecture ? ` · ${item.prefecture}` : ''} · ${item.timezone}`
   if ('producer' in item) return [item.singer, item.producer].filter(Boolean).join(' / ') || '歌手与 P主未设置'
   if ('url' in item) return [item.publisher, item.url].filter(Boolean).join(' · ')
@@ -377,7 +430,12 @@ function statusColor(item: KnowledgeRecord): string | undefined {
 }
 function parseSection(value: unknown): ConcertResource {
   const candidate = Array.isArray(value) ? value[0] : value
-  return sections.some(item => item.value === candidate) ? candidate as ConcertResource : 'events'
+  return sections.some(item => item.value === candidate) ? candidate as ConcertResource : 'tours'
+}
+function parseTourId(value: unknown): number | null {
+  const candidate = Array.isArray(value) ? value[0] : value
+  const parsed = typeof candidate === 'string' && /^\d+$/.test(candidate) ? Number(candidate) : NaN
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
 }
 function beforeUnload(event: BeforeUnloadEvent) { if (!dirty.value) return; event.preventDefault(); event.returnValue = '' }
 function handleApiError(caught: unknown, fallback: string) {
@@ -395,6 +453,7 @@ function handleApiError(caught: unknown, fallback: string) {
 .knowledge-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .knowledge-card { overflow: hidden; border: 1px solid var(--site-border); }
 .knowledge-tabs { border-bottom: 1px solid var(--site-border); }
+.tour-context { margin: 16px 20px 0; }
 .knowledge-toolbar { padding: 18px 20px; display: grid; grid-template-columns: minmax(240px, 1fr) minmax(150px, 240px) auto auto; gap: 12px; align-items: center; }
 .knowledge-alert { margin: 0 20px 18px; }
 .knowledge-state { min-height: 300px; padding: 44px 24px; display: flex; align-items: center; justify-content: center; text-align: left; gap: 18px; }
@@ -408,6 +467,8 @@ function handleApiError(caught: unknown, fallback: string) {
 .vocalist-marker-segment { min-height: 4px; flex: 1; }
 .primary-cell { min-width: 210px; display: grid; gap: 3px; }
 .primary-cell span { color: var(--site-muted); font-size: .75rem; }
+.tour-name-link { width: fit-content; color: inherit; font-weight: 700; text-decoration: none; text-underline-offset: 3px; }
+.tour-name-link:hover, .tour-name-link:focus-visible { color: rgb(var(--v-theme-secondary)); text-decoration: underline; }
 .actions-column { width: 152px; white-space: nowrap; text-align: right !important; }
 .knowledge-pagination { padding: 16px 20px; border-top: 1px solid var(--site-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--site-muted); font-size: .85rem; }
 .knowledge-drawer :deep(.v-navigation-drawer__content) { overflow-y: auto; }

@@ -41,8 +41,6 @@
         <div class="form-grid">
           <v-text-field v-model="form.local_date" label="当地日期" type="date" />
           <v-text-field v-model="form.local_start_time" label="当地开始时间" type="time" step="60" :disabled="!form.local_date" />
-          <v-text-field v-model="form.local_end_date" label="当地结束日期" type="date" :disabled="!form.local_start_time" />
-          <v-text-field v-model="form.local_end_time" label="当地结束时间" type="time" step="60" :disabled="!form.local_start_time" />
         </div>
         <div v-if="timePreview || timeError" class="time-preview" :class="{ 'time-preview-error': timeError }">
           <v-icon :icon="timeError ? 'mdi-alert-circle-outline' : 'mdi-clock-check-outline'" size="18" />
@@ -132,7 +130,7 @@ import {
 interface EventFormState {
   tour_id: number | null; venue_id: number | null; slug: string; official_name: string
   event_type: EventDTO['event_type']; city: string; timezone: string
-  local_date: string; local_start_time: string; local_end_date: string; local_end_time: string
+  local_date: string; local_start_time: string
   status: EventDTO['status']; confidence: EventDTO['confidence']; notes: string
 }
 interface EditableSetlistItem extends Omit<SetlistItemInput, 'song_id'> { key: string; song_id: number | null; version_label: string; confidence: EventDTO['confidence']; notes: string; is_encore: boolean; is_medley: boolean }
@@ -185,22 +183,16 @@ const editorTitle = computed(() => currentEvent.value ? '编辑演出场次' : c
 
 const timeState = computed(() => {
   try {
-    if (!form.local_date || !form.local_start_time) return { start: null, end: null, error: null }
+    if (!form.local_date || !form.local_start_time) return { start: null, error: null }
     const start = zonedLocalToUtc(`${form.local_date}T${form.local_start_time.slice(0, 5)}`, form.timezone)
-    let end: string | null = null
-    if (form.local_end_time) {
-      const endDate = form.local_end_date || form.local_date
-      end = zonedLocalToUtc(`${endDate}T${form.local_end_time.slice(0, 5)}`, form.timezone)
-      if (new Date(end) <= new Date(start)) throw new Error('结束时间必须晚于开始时间')
-    }
-    return { start, end, error: null }
+    return { start, error: null }
   } catch (caught) {
-    return { start: null, end: null, error: caught instanceof Error ? caught.message : '时间换算失败' }
+    return { start: null, error: caught instanceof Error ? caught.message : '时间换算失败' }
   }
 })
 const timeError = computed(() => timeState.value.error)
 const timePreview = computed(() => timeState.value.start
-  ? `UTC：${timeState.value.start}${timeState.value.end ? ` — ${timeState.value.end}` : ''}`
+  ? `UTC：${timeState.value.start}`
   : form.local_date ? '已记录当地日期；填写开始时间后将自动换算 UTC。' : '')
 
 watch(() => [props.record, props.copySource] as const, reset, { immediate: true })
@@ -232,31 +224,22 @@ async function reset() {
 }
 
 function emptyForm(): EventFormState {
-  return { tour_id: null, venue_id: null, slug: '', official_name: '', event_type: 'concert', city: '', timezone: 'Asia/Tokyo', local_date: '', local_start_time: '', local_end_date: '', local_end_time: '', status: 'unknown', confidence: 'confirmed', notes: '' }
+  return { tour_id: null, venue_id: null, slug: '', official_name: '', event_type: 'concert', city: '', timezone: 'Asia/Tokyo', local_date: '', local_start_time: '', status: 'unknown', confidence: 'confirmed', notes: '' }
 }
 
 function fillForm(record: EventDTO) {
   const startLocal = record.starts_at_utc ? toLocalDateTimeInput(record.starts_at_utc, record.timezone) : ''
-  const endLocal = record.ends_at_utc ? toLocalDateTimeInput(record.ends_at_utc, record.timezone) : ''
   Object.assign(form, {
     tour_id: record.tour_id, venue_id: record.venue_id, slug: record.slug, official_name: record.official_name,
     event_type: record.event_type, city: record.city ?? '', timezone: record.timezone,
     local_date: startLocal.slice(0, 10) || record.local_date || '',
     local_start_time: startLocal.slice(11, 16) || record.local_start_time?.slice(0, 5) || '',
-    local_end_date: endLocal.slice(0, 10), local_end_time: endLocal.slice(11, 16),
     status: record.status, confidence: record.confidence, notes: record.notes ?? '',
   })
 }
 
 function fillCopyForm(record: EventDTO) {
   fillForm(record)
-  Object.assign(form, {
-    slug: '',
-    local_date: '',
-    local_start_time: '',
-    local_end_date: '',
-    local_end_time: '',
-  })
 }
 
 async function loadRelations(id: number, version: number) {
@@ -313,7 +296,7 @@ function buildInput(): EventInput {
     tour_id: form.tour_id, venue_id: form.venue_id, slug: form.slug.trim(), official_name: form.official_name.trim(),
     event_type: form.event_type, city: toNullable(form.city), timezone: form.timezone.trim(),
     local_date: form.local_date || null, local_start_time: form.local_start_time ? `${form.local_start_time.slice(0, 5)}:00` : null,
-    starts_at_utc: timeState.value.start, ends_at_utc: timeState.value.end,
+    starts_at_utc: timeState.value.start,
     status: form.status, confidence: form.confidence, notes: toNullable(form.notes),
   }
 }
