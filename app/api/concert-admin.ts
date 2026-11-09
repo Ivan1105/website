@@ -173,6 +173,7 @@ export interface EventDTO extends BaseConcertDTO {
   status: EventStatus
   confidence: Confidence
   notes: string | null
+  miku_percent: number | null
 }
 
 export interface EventInput {

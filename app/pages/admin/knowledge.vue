@@ -56,7 +56,7 @@
 
         <div v-else class="knowledge-table-wrap" :aria-busy="loading">
           <v-table class="knowledge-table" hover>
-            <thead><tr><th v-if="section === 'songs'" class="vocalist-column"><span class="sr-only">歌手颜色</span></th><th>{{ currentConfig.primaryColumn }}</th><th>{{ currentConfig.secondaryColumn }}</th><th>状态</th><th class="actions-column">操作</th></tr></thead>
+            <thead><tr><th v-if="section === 'songs'" class="vocalist-column"><span class="sr-only">歌手颜色</span></th><th>{{ currentConfig.primaryColumn }}</th><th>{{ currentConfig.secondaryColumn }}</th><th v-if="section === 'events'">葱含量</th><th>状态</th><th class="actions-column">操作</th></tr></thead>
             <tbody>
               <tr v-for="item in items" :key="`${section}-${item.id}`">
                 <td v-if="section === 'songs'" class="vocalist-column">
@@ -81,6 +81,7 @@
                   </div>
                 </td>
                 <td>{{ secondaryText(item) }}</td>
+                <td v-if="section === 'events'">{{ isEvent(item) && item.miku_percent !== null ? `${item.miku_percent}%` : '—' }}</td>
                 <td><v-chip size="small" variant="tonal" :color="statusColor(item)">{{ statusText(item) }}</v-chip></td>
                 <td class="actions-column">
                   <v-btn
