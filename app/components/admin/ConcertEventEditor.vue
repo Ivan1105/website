@@ -55,6 +55,8 @@
             <div><p class="eyebrow">SETLIST</p><h3>歌单</h3><p class="muted">拖动手柄调整顺序，保存时将整单覆盖。</p></div>
             <div class="section-actions">
               <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-music-note-plus" :disabled="relationsLoading" @click="addSetlistItem">添加歌曲</v-btn>
+              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-content-copy" :disabled="setlistActionsDisabled" @click="copySetlistJson">复制 JSON</v-btn>
+              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-content-paste" :disabled="setlistActionsDisabled" @click="pasteSetlistJson">粘贴 JSON</v-btn>
               <v-btn variant="text" color="secondary" size="small" @click="$emit('switch-resource', 'songs')">维护歌曲库</v-btn>
             </div>
           </div>
@@ -104,6 +106,7 @@
         </v-btn>
       </footer>
     </v-form>
+
   </div>
 </template>
 
@@ -113,6 +116,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import type { FilterFunction } from 'vuetify'
 import {
   isApiError,
+  CONFIDENCE_LEVELS,
   useConcertAdminApi,
   type ConcertResource,
   type EventDTO,
@@ -134,6 +138,8 @@ interface EventFormState {
   status: EventDTO['status']; confidence: EventDTO['confidence']; notes: string
 }
 interface EditableSetlistItem extends Omit<SetlistItemInput, 'song_id'> { key: string; song_id: number | null; version_label: string; confidence: EventDTO['confidence']; notes: string; is_encore: boolean; is_medley: boolean }
+interface SetlistJsonItem { song_id: number; title: string; version_label: string | null; is_encore: boolean; is_medley: boolean; confidence: EventDTO['confidence']; notes: string | null }
+interface SetlistJsonDocument { format_version: 1; items: SetlistJsonItem[] }
 
 const props = defineProps<{ record: EventDTO | null; copySource: EventDTO | null }>()
 const emit = defineEmits<{
@@ -179,6 +185,7 @@ const requiredRules = [(value: string) => !!value?.trim() || '此项为必填']
 const slugRules = [...requiredRules, (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) || '只能包含小写字母、数字和连字符']
 const copyingMode = computed(() => props.copySource !== null && props.record === null)
 const canEditRelations = computed(() => currentEvent.value !== null || copyingMode.value)
+const setlistActionsDisabled = computed(() => relationsLoading.value || relationsLoadFailed.value || saving.value)
 const editorTitle = computed(() => currentEvent.value ? '编辑演出场次' : copyingMode.value ? '复制演出场次' : '新增演出场次')
 
 const timeState = computed(() => {
@@ -304,6 +311,62 @@ function buildInput(): EventInput {
 function addSetlistItem() { setlist.value.push({ key: crypto.randomUUID(), song_id: null, version_label: '', is_encore: false, is_medley: false, confidence: 'confirmed', notes: '' }) }
 function moveSetlist(index: number, delta: number) { const target = index + delta; if (target < 0 || target >= setlist.value.length) return; const [item] = setlist.value.splice(index, 1); if (item) setlist.value.splice(target, 0, item) }
 function toSetlistInput(item: EditableSetlistItem): SetlistItemInput { return { song_id: item.song_id!, version_label: toNullable(item.version_label), is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: toNullable(item.notes) } }
+
+async function copySetlistJson() {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持剪贴板写入。')
+    if (setlist.value.some(item => item.song_id === null)) throw new Error('请先为歌单中的每一项选择标准歌曲。')
+    const document: SetlistJsonDocument = {
+      format_version: 1,
+      items: setlist.value.map((item) => {
+        const song = songOptions.value.find(option => option.id === item.song_id)
+        return {
+          song_id: item.song_id!, title: song?.title ?? '', version_label: toNullable(item.version_label),
+          is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: toNullable(item.notes),
+        }
+      }),
+    }
+    await navigator.clipboard.writeText(JSON.stringify(document, null, 2))
+    success.value = '歌单 JSON 已复制到剪贴板。'
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '复制歌单 JSON 失败。'
+  }
+}
+
+async function pasteSetlistJson() {
+  try {
+    if (!navigator.clipboard?.readText) throw new Error('当前浏览器不支持从剪贴板读取。')
+    const text = await navigator.clipboard.readText()
+    if (!text.trim()) throw new Error('剪贴板中没有可粘贴的内容。')
+    const imported = parseSetlistJson(text)
+    setlist.value = imported.map(item => ({
+      key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '',
+      is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '',
+    }))
+    success.value = `已导入 ${imported.length} 首歌曲，保存后生效。`
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '读取或解析歌单 JSON 失败。'
+  }
+}
+
+function parseSetlistJson(text: string): SetlistJsonItem[] {
+  let value: unknown
+  try { value = JSON.parse(text) } catch { throw new Error('JSON 格式无效，请检查是否完整复制。') }
+  if (!isRecord(value) || value.format_version !== 1 || !Array.isArray(value.items)) throw new Error('歌单 JSON 格式无效，需要 format_version: 1 和 items 数组。')
+  const result: SetlistJsonItem[] = []
+  value.items.forEach((raw, index) => {
+    if (!isRecord(raw) || !Number.isInteger(raw.song_id) || typeof raw.is_encore !== 'boolean' || typeof raw.is_medley !== 'boolean' || typeof raw.confidence !== 'string') throw new Error(`第 ${index + 1} 首歌曲的字段格式无效。`)
+    if (!CONFIDENCE_LEVELS.includes(raw.confidence as EventDTO['confidence'])) throw new Error(`第 ${index + 1} 首歌曲的确认级别无效。`)
+    const song = songOptions.value.find(option => option.id === raw.song_id)
+    if (!song) throw new Error(`找不到歌曲 ID ${raw.song_id}，请先维护歌曲库或重新加载歌单。`)
+    if (typeof raw.title !== 'string' || (raw.version_label !== null && typeof raw.version_label !== 'string')) throw new Error(`第 ${index + 1} 首歌曲的文本字段无效。`)
+    if (raw.notes !== null && typeof raw.notes !== 'string') throw new Error(`第 ${index + 1} 首歌曲的备注字段无效。`)
+    result.push({ song_id: raw.song_id as number, title: song.title, version_label: raw.version_label as string | null, is_encore: raw.is_encore as boolean, is_medley: raw.is_medley as boolean, confidence: raw.confidence as EventDTO['confidence'], notes: raw.notes as string | null })
+  })
+  return result
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
 
 async function loadTours(q?: string) { await loadOption('tours', () => concertAdminApi.listTours({ page_size: 50, q }), result => mergeOptions(tourOptions, result.items)) }
 async function loadVenues(q?: string) { await loadOption('venues', () => concertAdminApi.listVenues({ page_size: 50, q }), result => mergeOptions(venueOptions, result.items)) }
