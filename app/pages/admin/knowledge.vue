@@ -75,6 +75,7 @@
                     >
                       {{ primaryText(item) }}
                     </a>
+                    <button v-else-if="isEvent(item)" type="button" class="event-name-link" @click="openSetlist(item)">{{ primaryText(item) }}</button>
                     <strong v-else>{{ primaryText(item) }}</strong>
                     <span>{{ itemSlug(item) }}</span>
                   </div>
@@ -110,9 +111,17 @@
         @saved="handleEventSaved" @cancel="requestCloseEditor" @dirty-change="dirty = $event" @switch-resource="requestSection"
       />
       <ConcertReferenceEditor
-        v-else :resource="section" :record="editingRecord as ReferenceRecord | null"
+        v-else :key="referenceEditorKey" :resource="section" :record="editingRecord as ReferenceRecord | null"
         @saved="handleReferenceSaved" @cancel="requestCloseEditor" @dirty-change="dirty = $event" @switch-resource="requestSection"
       />
+    </v-navigation-drawer>
+
+    <v-navigation-drawer v-model="setlistDrawerOpen" location="right" temporary :width="mobile ? '100%' : 560" class="setlist-drawer">
+      <header class="setlist-drawer-header"><div><p class="eyebrow">SETLIST / 歌单</p><h2>{{ setlistEvent ? primaryText(setlistEvent) : '场次歌单' }}</h2><p v-if="setlistEvent" class="muted">{{ secondaryText(setlistEvent) }}</p></div><v-btn icon="mdi-close" variant="text" aria-label="关闭歌单" @click="closeSetlist" /></header>
+      <v-alert v-if="setlistError" type="error" variant="tonal" density="comfortable" class="setlist-alert">{{ setlistError }}<template #append><v-btn variant="text" size="small" @click="setlistEvent && loadSetlist(setlistEvent)">重试</v-btn></template></v-alert>
+      <div v-if="setlistLoading" class="setlist-state" aria-live="polite"><v-progress-circular indeterminate color="primary" size="30" width="3" /><span>正在加载歌单…</span></div>
+      <div v-else-if="!setlistError && !setlistItems.length" class="setlist-state"><v-icon icon="mdi-music-note-off-outline" size="34" /><span>该场次尚未维护歌单。</span></div>
+      <v-list v-else lines="two" class="setlist-list" aria-label="场次歌单"><v-list-item v-for="item in setlistItems" :key="item.id" class="setlist-item"><template #prepend><span class="setlist-vocalist-marker" role="img" :aria-label="`歌手颜色：${item.song?.singer || '其他或未设置'}`"><span v-for="color in setlistVocalistColors(item)" :key="color" class="setlist-vocalist-segment" :style="{ backgroundColor: `var(--vocalist-${color})` }" /></span><span class="setlist-position">{{ item.position }}</span></template><v-list-item-title>{{ item.song?.title ?? `歌曲 #${item.song_id ?? '未知'}` }}<span v-if="item.version_label" class="setlist-version">（{{ item.version_label }}）</span></v-list-item-title><v-list-item-subtitle><span class="setlist-meta"><span>{{ [item.song?.singer || '歌手未设置', item.song?.producer].filter(Boolean).join(' / ') }}</span></span><span v-if="item.is_encore || item.is_medley || item.notes" class="setlist-details">{{ [item.is_encore ? '返场' : '', item.is_medley ? 'Medley' : '', item.notes ?? ''].filter(Boolean).join(' · ') }}</span></v-list-item-subtitle></v-list-item></v-list>
     </v-navigation-drawer>
 
     <v-dialog v-model="deleteOpen" max-width="520" :persistent="deleting">
@@ -145,7 +154,7 @@ import {
   EVENT_STATUSES, EVENT_TYPES, SONG_STATUSES, SOURCE_RELIABILITIES, SOURCE_TYPES, TOUR_STATUSES,
   isApiError, useConcertAdminApi,
   type BaseConcertDTO, type ConcertPaginationDTO, type ConcertResource, type EventDTO,
-  type SongDTO, type SourceDTO, type TourDTO, type VenueDTO,
+  type SetlistItemDTO, type SongDTO, type SourceDTO, type TourDTO, type VenueDTO,
 } from '@/api'
 import { useAppStore } from '@/stores/app'
 import {
@@ -191,6 +200,7 @@ const filter = ref<string | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const editorOpen = ref(false)
+const referenceEditorVersion = ref(0)
 const editingRecord = ref<KnowledgeRecord | null>(null)
 const copyingRecord = ref<EventDTO | null>(null)
 const dirty = ref(false)
@@ -203,6 +213,12 @@ const pendingAction = ref<(() => void) | null>(null)
 const pendingRoute = ref<string | null>(null)
 const successOpen = ref(false)
 const successMessage = ref('保存成功')
+const setlistDrawerOpen = ref(false)
+const setlistEvent = ref<EventDTO | null>(null)
+const setlistItems = ref<SetlistItemDTO[]>([])
+const setlistLoading = ref(false)
+const setlistError = ref<string | null>(null)
+const referenceEditorKey = computed(() => `${section.value}-${editingRecord.value?.id ?? 'new'}-${referenceEditorVersion.value}`)
 
 const currentConfig = computed(() => sections.find(item => item.value === section.value) ?? sections[0]!)
 const totalPages = computed(() => Math.max(1, Math.ceil(pagination.value.total / pagination.value.page_size)))
@@ -216,10 +232,30 @@ const filterItems = computed(() => {
 })
 
 useSeoMeta({ title: '资料库维护 · Ivan1105' })
-useHead(() => ({
-  htmlAttrs: { class: editorOpen.value ? 'knowledge-editor-open' : undefined },
-  bodyAttrs: { class: editorOpen.value ? 'knowledge-editor-open' : undefined },
-}))
+
+let pageOverflow = { html: '', body: '' }
+let pageScrollLocked = false
+watch([editorOpen, setlistDrawerOpen], ([editorOpenValue, setlistOpen]) => {
+  if (!import.meta.client) return
+  const shouldLock = editorOpenValue || setlistOpen
+  if (shouldLock && !pageScrollLocked) {
+    pageOverflow = { html: document.documentElement.style.overflow, body: document.body.style.overflow }
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
+    pageScrollLocked = true
+  } else if (!shouldLock && pageScrollLocked) {
+    document.documentElement.style.overflow = pageOverflow.html
+    document.body.style.overflow = pageOverflow.body
+    pageScrollLocked = false
+  }
+})
+onBeforeUnmount(() => {
+  if (!import.meta.client) return
+  if (pageScrollLocked) {
+    document.documentElement.style.overflow = pageOverflow.html
+    document.body.style.overflow = pageOverflow.body
+  }
+})
 
 watch(() => [route.query.section, route.query.tour_id] as const, ([sectionQuery, tourIdQuery]) => {
   const nextSection = parseSection(sectionQuery)
@@ -276,8 +312,25 @@ async function loadItems(page: number) {
 
 function applyFilters() { void loadItems(0) }
 function clearSearch() { search.value = ''; void loadItems(0) }
-function openCreate() { editingRecord.value = null; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
+function openCreate() { referenceEditorVersion.value += 1; editingRecord.value = null; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
 function openEdit(item: KnowledgeRecord) { editingRecord.value = item; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
+function openSetlist(item: EventDTO) { runGuarded(() => { setlistEvent.value = item; setlistItems.value = []; setlistError.value = null; setlistDrawerOpen.value = true; void loadSetlist(item) }) }
+async function loadSetlist(event: EventDTO) {
+  setlistLoading.value = true
+  try {
+    const result = await concertAdminApi.getSetlist(event.id)
+    if (setlistEvent.value?.id === event.id) setlistItems.value = result
+  } catch (caught) {
+    if (setlistEvent.value?.id === event.id) setlistError.value = isApiError(caught) ? caught.message : '暂时无法加载歌单，请稍后重试。'
+  } finally {
+    if (setlistEvent.value?.id === event.id) setlistLoading.value = false
+  }
+}
+function closeSetlist() { setlistDrawerOpen.value = false; setlistEvent.value = null; setlistItems.value = []; setlistError.value = null }
+function setlistVocalistColors(item: SetlistItemDTO): VocalistColor[] {
+  if (!item.song?.singer?.trim()) return ['other']
+  return [...new Set(item.song.singer.split(/[、,，/]+/).map(singer => vocalistColorMap[singer.trim()] ?? 'other'))]
+}
 function tourEventsHref(tour: TourDTO): string { return `/admin/knowledge?section=events&tour_id=${tour.id}` }
 function openTourEvents(tour: TourDTO) {
   runGuarded(() => {
@@ -396,6 +449,7 @@ function primaryText(item: KnowledgeRecord): string {
   return '未命名资料'
 }
 function isTour(item: KnowledgeRecord): item is TourDTO { return section.value === 'tours' && 'organizer' in item }
+function isEvent(item: KnowledgeRecord): item is EventDTO { return section.value === 'events' && 'official_name' in item }
 function itemSlug(item: KnowledgeRecord): string { return 'slug' in item ? item.slug : `ID ${item.id}` }
 function secondaryText(item: KnowledgeRecord): string {
   if ('official_name' in item) return [formatDate(item.local_date), item.city].filter(Boolean).join(' · ')
@@ -469,8 +523,28 @@ function handleApiError(caught: unknown, fallback: string) {
 .primary-cell span { color: var(--site-muted); font-size: .75rem; }
 .tour-name-link { width: fit-content; color: inherit; font-weight: 700; text-decoration: none; text-underline-offset: 3px; }
 .tour-name-link:hover, .tour-name-link:focus-visible { color: rgb(var(--v-theme-secondary)); text-decoration: underline; }
+.event-name-link { width: fit-content; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+.event-name-link:hover, .event-name-link:focus-visible { color: rgb(var(--v-theme-secondary)); text-decoration: underline; }
+.setlist-drawer :deep(.v-navigation-drawer__content) { overflow-y: auto; }
+.setlist-drawer.v-navigation-drawer { transition: transform 240ms cubic-bezier(.4, 0, .2, 1) !important; }
+.setlist-drawer-header { padding: 24px 26px 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--site-border); }
+.setlist-drawer-header h2 { margin: 6px 0; font-size: 1.35rem; }
+.setlist-alert { margin: 18px 20px; }
+.setlist-state { min-height: 180px; padding: 32px 24px; display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--site-muted); text-align: center; }
+.setlist-list { padding: 12px 16px; }
+.setlist-item { border-bottom: 1px solid var(--site-border); }
+.setlist-position { width: 30px; height: 30px; margin-right: 12px; display: grid; place-items: center; border-radius: 9px; color: #183b38; background: rgb(57 197 187 / 22%); font-size: .8rem; font-weight: 800; }
+.setlist-meta, .setlist-details { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.setlist-details { margin-top: 3px; }
+.setlist-version { color: var(--site-muted); font-weight: 500; }
+.setlist-vocalist-marker { width: 8px; height: 30px; margin-right: 10px; overflow: hidden; display: inline-flex; flex-direction: column; border-radius: 999px; }
+.setlist-vocalist-segment { min-height: 3px; flex: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .setlist-drawer.v-navigation-drawer { transition-duration: 240ms !important; }
+}
 .actions-column { width: 152px; white-space: nowrap; text-align: right !important; }
 .knowledge-pagination { padding: 16px 20px; border-top: 1px solid var(--site-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--site-muted); font-size: .85rem; }
 .knowledge-drawer :deep(.v-navigation-drawer__content) { overflow-y: auto; }
+.knowledge-drawer.v-navigation-drawer { transition: transform 240ms cubic-bezier(.4, 0, .2, 1) !important; }
 @media (max-width: 760px) { .knowledge-page { padding-block: 34px 64px; } .knowledge-heading { align-items: flex-start; flex-direction: column; } .knowledge-heading-actions { width: 100%; flex-direction: column-reverse; } .knowledge-heading-actions .v-btn { width: 100%; } .knowledge-toolbar { grid-template-columns: 1fr auto; } .knowledge-toolbar > :first-child { grid-column: 1 / -1; } .knowledge-pagination { align-items: flex-start; flex-direction: column; } }
 </style>
