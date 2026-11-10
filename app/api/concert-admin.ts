@@ -212,6 +212,7 @@ export interface SetlistItemInput {
   version_label?: string | null
   is_encore?: boolean
   is_medley?: boolean
+  is_tape_song?: boolean
   confidence?: Confidence
   notes?: string | null
 }
@@ -223,6 +224,7 @@ export interface SetlistItemDTO extends BaseConcertDTO {
   version_label: string | null
   is_encore: boolean
   is_medley: boolean
+  is_tape_song: boolean
   confidence: Confidence
   notes: string | null
   song: SongDTO | null

@@ -79,6 +79,7 @@
                 <div class="setlist-flags">
                   <v-checkbox v-model="item.is_encore" label="安可" density="compact" hide-details />
                   <v-checkbox v-model="item.is_medley" label="组曲" density="compact" hide-details />
+                  <v-checkbox v-model="item.is_tape_song" label="彩带曲" density="compact" hide-details />
                 </div>
               </div>
               <div class="setlist-actions">
@@ -137,8 +138,8 @@ interface EventFormState {
   local_date: string; local_start_time: string
   status: EventDTO['status']; confidence: EventDTO['confidence']; notes: string
 }
-interface EditableSetlistItem extends Omit<SetlistItemInput, 'song_id'> { key: string; song_id: number | null; version_label: string; confidence: EventDTO['confidence']; notes: string; is_encore: boolean; is_medley: boolean }
-interface SetlistJsonItem { song_id: number; title: string; version_label: string | null; is_encore: boolean; is_medley: boolean; confidence: EventDTO['confidence']; notes: string | null }
+interface EditableSetlistItem extends Omit<SetlistItemInput, 'song_id'> { key: string; song_id: number | null; version_label: string; confidence: EventDTO['confidence']; notes: string; is_encore: boolean; is_medley: boolean; is_tape_song: boolean }
+interface SetlistJsonItem { song_id: number; title: string; version_label: string | null; is_encore: boolean; is_medley: boolean; is_tape_song: boolean; confidence: EventDTO['confidence']; notes: string | null }
 interface SetlistJsonDocument { format_version: 1; items: SetlistJsonItem[] }
 
 const props = defineProps<{ record: EventDTO | null; copySource: EventDTO | null }>()
@@ -256,7 +257,7 @@ async function loadRelations(id: number, version: number) {
     if (version !== resetVersion) return
     setlist.value = setlistData.map(item => ({
       key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '', is_encore: item.is_encore,
-      is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '',
+      is_medley: item.is_medley, is_tape_song: item.is_tape_song, confidence: item.confidence, notes: item.notes ?? '',
     }))
     mergeOptions(songOptions, setlistData.flatMap(item => item.song ? [item.song] : []))
   } catch (caught) {
@@ -286,7 +287,7 @@ async function save() {
     fillForm(saved)
     if (props.record || props.copySource || setlist.value.length) {
       const savedSetlist = await concertAdminApi.replaceSetlist(saved.id, setlist.value.map(toSetlistInput))
-      setlist.value = savedSetlist.map(item => ({ key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '', is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '' }))
+      setlist.value = savedSetlist.map(item => ({ key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '', is_encore: item.is_encore, is_medley: item.is_medley, is_tape_song: item.is_tape_song, confidence: item.confidence, notes: item.notes ?? '' }))
     }
     success.value = props.record ? '演出资料已保存。' : props.copySource ? '场次副本已创建，现在可以继续编辑。' : '场次已创建，现在可以继续维护歌单。'
     markClean()
@@ -308,9 +309,9 @@ function buildInput(): EventInput {
   }
 }
 
-function addSetlistItem() { setlist.value.push({ key: crypto.randomUUID(), song_id: null, version_label: '', is_encore: false, is_medley: false, confidence: 'confirmed', notes: '' }) }
+function addSetlistItem() { setlist.value.push({ key: crypto.randomUUID(), song_id: null, version_label: '', is_encore: false, is_medley: false, is_tape_song: false, confidence: 'confirmed', notes: '' }) }
 function moveSetlist(index: number, delta: number) { const target = index + delta; if (target < 0 || target >= setlist.value.length) return; const [item] = setlist.value.splice(index, 1); if (item) setlist.value.splice(target, 0, item) }
-function toSetlistInput(item: EditableSetlistItem): SetlistItemInput { return { song_id: item.song_id!, version_label: toNullable(item.version_label), is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: toNullable(item.notes) } }
+function toSetlistInput(item: EditableSetlistItem): SetlistItemInput { return { song_id: item.song_id!, version_label: toNullable(item.version_label), is_encore: item.is_encore, is_medley: item.is_medley, is_tape_song: item.is_tape_song, confidence: item.confidence, notes: toNullable(item.notes) } }
 
 async function copySetlistJson() {
   try {
@@ -322,7 +323,7 @@ async function copySetlistJson() {
         const song = songOptions.value.find(option => option.id === item.song_id)
         return {
           song_id: item.song_id!, title: song?.title ?? '', version_label: toNullable(item.version_label),
-          is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: toNullable(item.notes),
+          is_encore: item.is_encore, is_medley: item.is_medley, is_tape_song: item.is_tape_song, confidence: item.confidence, notes: toNullable(item.notes),
         }
       }),
     }
@@ -341,7 +342,7 @@ async function pasteSetlistJson() {
     const imported = parseSetlistJson(text)
     setlist.value = imported.map(item => ({
       key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '',
-      is_encore: item.is_encore, is_medley: item.is_medley, confidence: item.confidence, notes: item.notes ?? '',
+      is_encore: item.is_encore, is_medley: item.is_medley, is_tape_song: item.is_tape_song ?? false, confidence: item.confidence, notes: item.notes ?? '',
     }))
     success.value = `已导入 ${imported.length} 首歌曲，保存后生效。`
   } catch (caught) {
@@ -355,13 +356,13 @@ function parseSetlistJson(text: string): SetlistJsonItem[] {
   if (!isRecord(value) || value.format_version !== 1 || !Array.isArray(value.items)) throw new Error('歌单 JSON 格式无效，需要 format_version: 1 和 items 数组。')
   const result: SetlistJsonItem[] = []
   value.items.forEach((raw, index) => {
-    if (!isRecord(raw) || !Number.isInteger(raw.song_id) || typeof raw.is_encore !== 'boolean' || typeof raw.is_medley !== 'boolean' || typeof raw.confidence !== 'string') throw new Error(`第 ${index + 1} 首歌曲的字段格式无效。`)
+    if (!isRecord(raw) || !Number.isInteger(raw.song_id) || typeof raw.is_encore !== 'boolean' || typeof raw.is_medley !== 'boolean' || (raw.is_tape_song !== undefined && typeof raw.is_tape_song !== 'boolean') || typeof raw.confidence !== 'string') throw new Error(`第 ${index + 1} 首歌曲的字段格式无效。`)
     if (!CONFIDENCE_LEVELS.includes(raw.confidence as EventDTO['confidence'])) throw new Error(`第 ${index + 1} 首歌曲的确认级别无效。`)
     const song = songOptions.value.find(option => option.id === raw.song_id)
     if (!song) throw new Error(`找不到歌曲 ID ${raw.song_id}，请先维护歌曲库或重新加载歌单。`)
     if (typeof raw.title !== 'string' || (raw.version_label !== null && typeof raw.version_label !== 'string')) throw new Error(`第 ${index + 1} 首歌曲的文本字段无效。`)
     if (raw.notes !== null && typeof raw.notes !== 'string') throw new Error(`第 ${index + 1} 首歌曲的备注字段无效。`)
-    result.push({ song_id: raw.song_id as number, title: song.title, version_label: raw.version_label as string | null, is_encore: raw.is_encore as boolean, is_medley: raw.is_medley as boolean, confidence: raw.confidence as EventDTO['confidence'], notes: raw.notes as string | null })
+    result.push({ song_id: raw.song_id as number, title: song.title, version_label: raw.version_label as string | null, is_encore: raw.is_encore as boolean, is_medley: raw.is_medley as boolean, is_tape_song: (raw.is_tape_song as boolean | undefined) ?? false, confidence: raw.confidence as EventDTO['confidence'], notes: raw.notes as string | null })
   })
   return result
 }
