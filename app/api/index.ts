@@ -110,7 +110,7 @@ export { useOAuthApi } from './oauth'
 export type { OAuthAuthorizeDTO, OAuthServiceDTO } from './oauth'
 
 export { useAccountApi } from './account'
-export type { AccountInfoDTO, UpdateAccountInfoReq } from './account'
+export type { AccountInfoDTO, AiUserProfileDTO, UpdateAccountInfoReq, UpdateAiUserProfileReq } from './account'
 
 export { useUserApi } from './user'
 export type { LoginReq, LoginResp, UserInfoDTO, UserRole } from './user'

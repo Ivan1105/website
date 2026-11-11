@@ -62,6 +62,13 @@
                     aria-label="自动记录日记" @click.stop @update:model-value="updateJournal" />
                 </template>
               </v-list-item>
+              <v-list-item class="chat-setting-item" prepend-icon="mdi-account-edit-outline"
+                @click="openAiProfileDialog">
+                <v-list-item-title>个人资料</v-list-item-title>
+                <v-list-item-subtitle class="chat-setting-description">
+                  告诉 Miku 如何称呼你，以及你的城市、时区和生日。
+                </v-list-item-subtitle>
+              </v-list-item>
               <v-list-item class="chat-setting-item" prepend-icon="mdi-shield-key-outline"
                 @click="openServiceConnectionsDialog">
                 <v-list-item-title>第三方服务授权</v-list-item-title>
@@ -198,6 +205,62 @@
           <v-btn variant="text" :disabled="creatingThread" @click="clearContextDialogOpen = false">取消</v-btn>
           <v-btn color="primary" :loading="creatingThread" :disabled="creatingThread" @click="clearContext">新建会话</v-btn>
         </v-card-actions>
+      </v-card>
+    </v-dialog>
+    <v-dialog v-model="aiProfileDialogOpen" persistent fullscreen transition="dialog-bottom-transition">
+      <v-card class="ai-profile-page">
+        <v-toolbar class="email-config-toolbar" color="surface" flat>
+          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="aiProfileSaving"
+            @click="closeAiProfileDialog" />
+          <v-toolbar-title>个人资料</v-toolbar-title>
+          <v-btn icon="mdi-close" variant="text" aria-label="关闭个人资料"
+            :disabled="aiProfileSaving" @click="closeAiProfileDialog" />
+        </v-toolbar>
+        <v-divider />
+        <v-card-text class="ai-profile-content">
+          <div class="ai-profile-shell">
+            <header class="ai-profile-intro">
+              <span class="ai-profile-icon" aria-hidden="true">
+                <v-icon icon="mdi-account-heart-outline" color="secondary" size="38" />
+              </span>
+              <div>
+                <p class="eyebrow">AI PROFILE</p>
+                <h2>让 Miku 更了解你</h2>
+                <p>这些信息只用于个性化对话、时间和提醒相关功能。</p>
+              </div>
+            </header>
+
+            <div v-if="aiProfileLoading" class="ai-profile-state" role="status">
+              <v-progress-circular indeterminate color="secondary" size="30" width="2" />
+              <p>正在读取个人资料…</p>
+            </div>
+            <div v-else class="ai-profile-form">
+              <v-alert v-if="aiProfileError" type="error" variant="tonal" class="ai-profile-alert">
+                {{ aiProfileError }}
+              </v-alert>
+              <v-alert v-if="aiProfileSuccess" type="success" variant="tonal" class="ai-profile-alert">
+                个人资料已更新。
+              </v-alert>
+              <v-text-field v-model="aiProfileForm.nickname" label="昵称" placeholder="Miku 希望如何称呼你？"
+                maxlength="64" counter="64" clearable :disabled="aiProfileSaving" />
+              <v-text-field v-model="aiProfileForm.cityname" label="所在城市" placeholder="例如：Hong Kong"
+                maxlength="128" counter="128" clearable :disabled="aiProfileSaving" />
+              <v-text-field v-model="aiProfileForm.timezone" label="时区" placeholder="例如：Asia/Hong_Kong"
+                hint="请输入 IANA 时区名称" persistent-hint maxlength="64" clearable :disabled="aiProfileSaving" />
+              <v-text-field v-model="aiProfileForm.birthday" label="生日" type="date" clearable
+                :disabled="aiProfileSaving" />
+              <div v-if="aiProfileSaveError" class="ai-profile-save-error" role="alert">
+                <v-icon icon="mdi-alert-circle-outline" size="18" />
+                <span>{{ aiProfileSaveError }}</span>
+              </div>
+              <div class="ai-profile-actions">
+                <v-btn variant="text" :disabled="aiProfileSaving" @click="closeAiProfileDialog">取消</v-btn>
+                <v-btn color="primary" :loading="aiProfileSaving" :disabled="!canSaveAiProfile"
+                  prepend-icon="mdi-content-save-outline" @click="saveAiProfile">保存资料</v-btn>
+              </div>
+            </div>
+          </div>
+        </v-card-text>
       </v-card>
     </v-dialog>
     <v-dialog v-model="serviceConnectionsDialogOpen" persistent fullscreen transition="dialog-bottom-transition">
@@ -718,7 +781,7 @@
 </template>
 
 <script setup lang="ts">
-import { isApiError, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type ImapSubscriptionData, type ImapSubscriptionStatus, type MailAccountDTO, type MailEndpointDTO, type MessageDTO, type MessageSourceDTO, type OAuthServiceDTO, type OutlookSubscriptionData, type OutlookSubscriptionStatus, type UpdateImapConfigReq } from '@/api'
+import { isApiError, useAccountApi, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type AiUserProfileDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type ImapSubscriptionData, type ImapSubscriptionStatus, type MailAccountDTO, type MailEndpointDTO, type MessageDTO, type MessageSourceDTO, type OAuthServiceDTO, type OutlookSubscriptionData, type OutlookSubscriptionStatus, type UpdateImapConfigReq } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
 import { useDisplay } from 'vuetify'
@@ -727,6 +790,7 @@ import MarkdownIt from 'markdown-it'
 
 useSeoMeta({ title: '聊天 · Ivan1105' })
 const { chatApi } = useChatApi()
+const { accountApi } = useAccountApi()
 const { mailApi } = useMailApi()
 const { oauthApi } = useOAuthApi()
 const appStore = useAppStore()
@@ -755,6 +819,12 @@ interface MailConfigForm {
   endpointKey: string
   username: string
   password: string
+}
+interface AiProfileForm {
+  nickname: string
+  cityname: string
+  timezone: string
+  birthday: string
 }
 interface MailEndpointOption {
   key: string
@@ -889,6 +959,13 @@ const mailTouched = reactive<Record<MailField, boolean>>({
   password: false,
 })
 const settingsMenuOpen = ref(false)
+const aiProfileDialogOpen = ref(false)
+const aiProfileLoading = ref(false)
+const aiProfileSaving = ref(false)
+const aiProfileError = ref('')
+const aiProfileSaveError = ref('')
+const aiProfileSuccess = ref(false)
+const aiProfileForm = reactive<AiProfileForm>({ nickname: '', cityname: '', timezone: '', birthday: '' })
 const proactiveUpdating = ref(false)
 const journalUpdating = ref(false)
 const drawerOpen = ref(false)
@@ -2208,6 +2285,88 @@ const openServiceConnectionsDialog = () => {
   serviceConnectionTab.value = 'oauth'
   serviceConnectionsDialogOpen.value = true
   void loadOAuthServices()
+}
+
+const resetAiProfileForm = () => {
+  aiProfileForm.nickname = ''
+  aiProfileForm.cityname = ''
+  aiProfileForm.timezone = ''
+  aiProfileForm.birthday = ''
+}
+
+const applyAiProfile = (profile: AiUserProfileDTO | null) => {
+  aiProfileForm.nickname = profile?.nickname ?? ''
+  aiProfileForm.cityname = profile?.cityname ?? ''
+  aiProfileForm.timezone = profile?.timezone ?? ''
+  aiProfileForm.birthday = profile?.birthday ?? ''
+}
+
+const canSaveAiProfile = computed(() => {
+  if (aiProfileSaving.value || aiProfileLoading.value) return false
+  if (Array.from(aiProfileForm.nickname).length > 64) return false
+  if (Array.from(aiProfileForm.cityname).length > 128) return false
+  if (aiProfileForm.timezone.length > 64) return false
+  return !aiProfileForm.birthday || /^\d{4}-\d{2}-\d{2}$/.test(aiProfileForm.birthday)
+})
+
+const openAiProfileDialog = () => {
+  settingsMenuOpen.value = false
+  aiProfileDialogOpen.value = true
+  aiProfileLoading.value = true
+  aiProfileError.value = ''
+  aiProfileSaveError.value = ''
+  aiProfileSuccess.value = false
+  resetAiProfileForm()
+  void loadAiProfile()
+}
+
+const loadAiProfile = async () => {
+  aiProfileLoading.value = true
+  aiProfileError.value = ''
+  try {
+    applyAiProfile(await accountApi.queryAiUserProfile())
+  } catch (error) {
+    if (handleUnauthorized(error)) {
+      aiProfileDialogOpen.value = false
+      return
+    }
+    aiProfileError.value = isApiError(error) ? error.message : '个人资料加载失败，请稍后重试。'
+  } finally {
+    aiProfileLoading.value = false
+  }
+}
+
+const closeAiProfileDialog = () => {
+  if (aiProfileSaving.value) return
+  aiProfileDialogOpen.value = false
+  aiProfileError.value = ''
+  aiProfileSaveError.value = ''
+  aiProfileSuccess.value = false
+}
+
+const saveAiProfile = async () => {
+  if (!canSaveAiProfile.value) return
+  aiProfileSaving.value = true
+  aiProfileSaveError.value = ''
+  aiProfileSuccess.value = false
+  try {
+    const profile = await accountApi.updateAiUserProfile({
+      nickname: aiProfileForm.nickname.trim() || null,
+      cityname: aiProfileForm.cityname.trim() || null,
+      timezone: aiProfileForm.timezone.trim() || null,
+      birthday: aiProfileForm.birthday || null,
+    })
+    applyAiProfile(profile)
+    aiProfileSuccess.value = true
+  } catch (error) {
+    if (handleUnauthorized(error)) {
+      aiProfileDialogOpen.value = false
+      return
+    }
+    aiProfileSaveError.value = isApiError(error) ? error.message : '个人资料保存失败，请稍后重试。'
+  } finally {
+    aiProfileSaving.value = false
+  }
 }
 
 const activateServiceConnectionTab = (tab: ServiceConnectionTab) => {
@@ -3572,6 +3731,100 @@ onBeforeUnmount(() => {
   }
   .state-icon {
     display: none;
+  }
+}
+.ai-profile-content {
+  padding: clamp(24px, 5vw, 48px) 24px 56px;
+}
+
+.ai-profile-shell {
+  width: min(720px, 100%);
+  margin-inline: auto;
+}
+
+.ai-profile-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.ai-profile-icon {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  place-items: center;
+  border-radius: 20px;
+  background: var(--site-soft);
+}
+
+.ai-profile-intro h2 {
+  margin: 4px 0 8px;
+  color: var(--site-text);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+}
+
+.ai-profile-intro p:last-child {
+  margin: 0;
+  color: var(--site-muted);
+}
+
+.ai-profile-form {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-profile-alert {
+  margin-bottom: 8px;
+}
+
+.ai-profile-state {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  color: var(--site-muted);
+}
+
+.ai-profile-save-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: rgb(var(--v-theme-error));
+}
+
+.ai-profile-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+@media (max-width: 600px) {
+  .ai-profile-content {
+    padding-inline: 20px;
+  }
+
+  .ai-profile-intro {
+    gap: 12px;
+  }
+
+  .ai-profile-icon {
+    width: 52px;
+    height: 52px;
+    flex-basis: 52px;
+    border-radius: 16px;
+  }
+
+  .ai-profile-actions {
+    flex-direction: column-reverse;
+  }
+
+  .ai-profile-actions .v-btn {
+    width: 100%;
   }
 }
 </style>
