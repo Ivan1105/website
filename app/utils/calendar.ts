@@ -15,6 +15,40 @@ export function calendarDays(month: string): string[] {
 export function eventsOnDate(events: CalendarOccurrence[], date: string) {
   return events.filter(event => event.occurrence_start_date <= date && event.occurrence_end_date >= date)
 }
+
+export function eventLocalDateTime(date: string, time: string, timezone: string): Date | null {
+  try {
+    const value = `${date}T${time.slice(0, 8).padEnd(8, ':00')}`
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/.exec(value)
+    if (!match) return null
+    const target = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]))
+    let guess = target
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+    for (let index = 0; index < 4; index += 1) {
+      const parts = formatter.formatToParts(new Date(guess))
+      const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? ''
+      const shown = Date.UTC(Number(get('year')), Number(get('month')) - 1, Number(get('day')), Number(get('hour')), Number(get('minute')), Number(get('second')))
+      const delta = target - shown
+      guess += delta
+      if (!delta) break
+    }
+    return new Date(guess)
+  } catch { return null }
+}
+
+export function browserEventDate(event: CalendarOccurrence, end = false): string {
+  if (event.all_day || !event.start_time) return end ? event.occurrence_end_date : event.occurrence_start_date
+  const date = end ? event.occurrence_end_date : event.occurrence_start_date
+  const time = end ? event.end_time ?? event.start_time : event.start_time
+  const instant = eventLocalDateTime(date, time, event.timezone)
+  return instant ? localDate(instant) : date
+}
+
+export function browserEventTime(event: CalendarOccurrence, end = false): string {
+  if (event.all_day || !event.start_time) return '全天'
+  const instant = eventLocalDateTime(end ? event.occurrence_end_date : event.occurrence_start_date, end ? event.end_time ?? event.start_time : event.start_time, event.timezone)
+  return instant ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(instant) : (end ? event.end_time ?? event.start_time : event.start_time)
+}
 export function validateCalendarInput(input: CalendarInput): string | null {
   const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
     && value >= '1000-01-01' && value <= '9999-12-31'

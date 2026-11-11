@@ -58,7 +58,7 @@
           <p v-else-if="loadError" class="muted">加载失败，请重试。</p>
           <div v-else-if="!selectedEvents.length" class="agenda-empty"><v-icon icon="mdi-calendar-blank-outline" size="36" /><p>这一天暂时没有事件</p><v-btn v-if="canManage" variant="text" color="secondary" @click="createEvent">添加一个重要日子</v-btn></div>
           <v-btn v-for="item in selectedEvents" :key="`${item.id}:${item.occurrence_start_date}`" class="agenda-event" variant="text" @click="openEvent(item, selectedDate)">
-            <span class="event-copy"><span class="event-meta">{{ calendarTypeLabel(item.event_type) }} · {{ item.all_day ? '全天' : item.start_time }}<span v-if="item.status === 'cancelled'"> · 已取消</span></span><strong :class="{ cancelled: item.status === 'cancelled' }">{{ item.title }}</strong><span class="event-zone">{{ item.timezone }}<span v-if="item.recurrence === 'yearly'"> · 每年重复</span></span></span><v-icon icon="mdi-arrow-top-right" size="18" />
+            <span class="event-copy"><span class="event-meta">{{ calendarTypeLabel(item.event_type) }} · {{ browserEventTime(item) }}<span v-if="item.status === 'cancelled'"> · 已取消</span></span><strong :class="{ cancelled: item.status === 'cancelled' }">{{ item.title }}</strong><span class="event-zone">{{ item.all_day ? item.timezone : browserTimezone }}<span v-if="item.recurrence === 'yearly'"> · 每年重复</span></span></span><v-icon icon="mdi-arrow-top-right" size="18" />
           </v-btn>
         </v-card>
       </div>
@@ -74,8 +74,8 @@
             <h2 class="detail-title">{{ detail.title }}</h2>
             <v-alert v-if="detail.user_id !== null" type="info" variant="tonal" class="mb-4">由用户资料同步，请通过用户资料修改生日。</v-alert>
             <v-alert v-else-if="detail.concert_event_id !== null" type="info" variant="tonal" class="mb-4">由演出信息同步，请通过演出管理修改。</v-alert>
-            <p>{{ detailOccurrence?.occurrence_start_date ?? detail.start_date }} 至 {{ detailOccurrence?.occurrence_end_date ?? detail.end_date }}</p>
-            <p>{{ detail.all_day ? '全天' : `${detail.start_time}${detail.end_time ? ` — ${detail.end_time}` : ''}` }} · {{ detail.timezone }}</p>
+            <p>{{ detailOccurrence ? browserEventDate(detailOccurrence) : detail.start_date }} 至 {{ detailOccurrence ? browserEventDate(detailOccurrence, true) : detail.end_date }}</p>
+            <p>{{ detail.all_day ? `全天 · ${detail.timezone}` : `${detailOccurrence ? browserEventTime(detailOccurrence) : detail.start_time}${detail.end_time ? ` — ${detailOccurrence ? browserEventTime(detailOccurrence, true) : detail.end_time}` : ''} · ${browserTimezone}` }}</p>
             <p v-if="detail.recurrence === 'yearly'" class="muted">每年重复 · 首次日期 {{ detail.start_date }}</p>
             <p v-if="detail.description" class="detail-description">{{ detail.description }}</p>
             <v-btn v-if="safeSourceUrl" :href="safeSourceUrl" target="_blank" rel="noopener noreferrer" variant="text" color="secondary" append-icon="mdi-open-in-new">查看来源</v-btn>
@@ -105,7 +105,7 @@
 import { useDisplay } from 'vuetify'
 import { VDatePickerMonths, VDatePickerYears } from 'vuetify/components/VDatePicker'
 import { calendarTypes, calendarTypeLabel, useCalendarApi, type CalendarType, type CalendarStatus, type CalendarEvent, type CalendarOccurrence } from '@/api/calendar'
-import { calendarDays, eventsOnDate, localDate } from '@/utils/calendar'
+import { browserEventDate, browserEventTime, calendarDays, localDate } from '@/utils/calendar'
 import { useAppStore } from '@/stores/app'
 import { useAuthSession } from '@/composables/useAuthSession'
 import CalendarEventEditor from '@/components/calendar/CalendarEventEditor.vue'
@@ -162,8 +162,12 @@ function applyMonthPicker() {
 const events = ref<CalendarOccurrence[]>([])
 const loading = ref(false)
 const loadError = ref('')
-const selectedEvents = computed(() => eventsOnDate(events.value, selectedDate.value))
-const eventsForDay = (date: string) => eventsOnDate(events.value, date)
+const browserTimezone = ref('UTC')
+function occursOnBrowserDate(event: CalendarOccurrence, date: string) {
+  return browserEventDate(event) <= date && browserEventDate(event, true) >= date
+}
+const selectedEvents = computed(() => events.value.filter(event => occursOnBrowserDate(event, selectedDate.value)))
+const eventsForDay = (date: string) => events.value.filter(event => occursOnBrowserDate(event, date))
 let requestVersion = 0
 async function loadEvents() {
   const version = ++requestVersion
@@ -172,7 +176,8 @@ async function loadEvents() {
   if (!canRead.value) { loading.value = false; return }
   loading.value = true
   try {
-    const result = await api.occurrences({ date_from: days.value[0]!, date_to: days.value[41]!, event_type: eventType.value ?? undefined, status: canManage.value ? status.value : 'active' }, canManage.value)
+    const queryDate = (value: string, offset: number) => { const date = new Date(`${value}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + offset); return date.toISOString().slice(0, 10) }
+    const result = await api.occurrences({ date_from: queryDate(days.value[0]!, -1), date_to: queryDate(days.value[41]!, 1), event_type: eventType.value ?? undefined, status: canManage.value ? status.value : 'active' }, canManage.value)
     if (version === requestVersion) events.value = result.items
   } catch (error) { if (version === requestVersion) loadError.value = error instanceof Error ? error.message : '日历加载失败。' }
   finally { if (version === requestVersion) loading.value = false }
@@ -244,7 +249,7 @@ watch([month, eventType, status, canRead, canManage, () => store.userInfo?.user_
 watch(canRead, value => { if (!value) { detailVersion++; detail.value = null; detailOpen.value = false } })
 watch(canManage, value => { if (!value) { editorOpen.value = false; deleteOpen.value = false; status.value = 'active' } })
 watch(deleteOpen, value => { if (!value) deleteError.value = '' })
-onMounted(async () => { goToday(); mounted.value = true; await initializeAuth() })
+onMounted(async () => { browserTimezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone; goToday(); mounted.value = true; await initializeAuth() })
 onBeforeUnmount(() => { requestVersion++; detailVersion++ })
 </script>
 
@@ -275,7 +280,7 @@ onBeforeUnmount(() => { requestVersion++; detailVersion++ })
 .day-cell.selected { background: color-mix(in srgb, #39c5bb 12%, white); box-shadow: inset 0 0 0 2px #39c5bb; }
 .day-cell.outside { background: var(--site-bg); color: var(--site-muted); }
 .day-number { align-self: start; min-width: 32px; padding-inline: 6px; }
-.grid-event { justify-content: start; width: 100%; min-width: 0; padding-inline: 6px; color: var(--site-text); background: color-mix(in srgb, #39c5bb 13%, white); }
+.grid-event { justify-content: start; width: 100%; min-width: 0; min-height: 0 !important; height: 20px !important; padding: 0 3px !important; color: var(--site-text); background: color-mix(in srgb, #39c5bb 13%, white); font-size: .62rem; letter-spacing: 0; }
 .grid-event :deep(.v-btn__content) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .more-events { min-width: 0; padding: 0; color: var(--site-muted); }
 .agenda-card { padding: 24px 16px; }
