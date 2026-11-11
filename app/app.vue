@@ -89,6 +89,7 @@ const { assetUrl } = useAssetUrl()
 const navItems = [
   { label: '首页', to: '/' },
   { label: '智能体', to: '/chatbox' },
+  { label: '日历', to: '/calendar' },
 ]
 
 const accountName = computed(() => appStore.userInfo?.username ?? '个人中心')
@@ -321,5 +322,9 @@ onMounted(async () => {
   .nav-account-placeholder {
     width: 72px;
   }
+}
+@media (max-width: 420px) {
+  .brand-copy { display: none; }
+  .nav-link { padding-inline: 8px; }
 }
 </style>

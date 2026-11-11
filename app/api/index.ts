@@ -1,4 +1,6 @@
 export { ApiError, isApiError } from './http'
+export { useCalendarApi, calendarTypes, calendarTypeLabel } from './calendar'
+export type { CalendarType, CalendarStatus, CalendarInput, CalendarEvent, CalendarOccurrence } from './calendar'
 
 export { NotificationStreamError, useNotificationApi } from './notifications'
 export type {
