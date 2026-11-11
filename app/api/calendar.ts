@@ -19,6 +19,7 @@ export interface CalendarInput {
 export interface CalendarEvent extends CalendarInput {
   id: number
   user_id: number | null
+  concert_event_id: number | null
   created_at: string
   updated_at: string
 }

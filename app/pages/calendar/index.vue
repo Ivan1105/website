@@ -73,6 +73,7 @@
             <p class="eyebrow">{{ calendarTypeLabel(detail.event_type) }} · {{ detail.status === 'cancelled' ? '已取消' : '正常' }}</p>
             <h2 class="detail-title">{{ detail.title }}</h2>
             <v-alert v-if="detail.user_id !== null" type="info" variant="tonal" class="mb-4">由用户资料同步，请通过用户资料修改生日。</v-alert>
+            <v-alert v-else-if="detail.concert_event_id !== null" type="info" variant="tonal" class="mb-4">由演出信息同步，请通过演出管理修改。</v-alert>
             <p>{{ detailOccurrence?.occurrence_start_date ?? detail.start_date }} 至 {{ detailOccurrence?.occurrence_end_date ?? detail.end_date }}</p>
             <p>{{ detail.all_day ? '全天' : `${detail.start_time}${detail.end_time ? ` — ${detail.end_time}` : ''}` }} · {{ detail.timezone }}</p>
             <p v-if="detail.recurrence === 'yearly'" class="muted">每年重复 · 首次日期 {{ detail.start_date }}</p>
@@ -81,7 +82,7 @@
           </template>
         </v-card-text>
         <v-card-actions class="detail-actions">
-          <template v-if="canManage && detail && detail.user_id === null && !detailLoading">
+          <template v-if="canManage && detail && detail.user_id === null && detail.concert_event_id === null && !detailLoading">
             <v-btn color="secondary" :disabled="mutating" @click="editEvent">编辑</v-btn>
             <v-btn :loading="mutating" @click="changeStatus">{{ detail.status === 'active' ? '取消事件' : '恢复事件' }}</v-btn>
             <v-btn color="error" :disabled="mutating" @click="deleteOpen = true">删除</v-btn>
@@ -217,7 +218,7 @@ const safeSourceUrl = computed(() => detail.value?.source_url && /^https?:\/\//i
 const editorOpen = ref(false)
 const editingEvent = ref<CalendarEvent | null>(null)
 function createEvent() { if (!canManage.value) return; editingEvent.value = null; editorOpen.value = true }
-function editEvent() { if (!canManage.value || !detail.value || detail.value.user_id !== null) return; editingEvent.value = detail.value; detailOpen.value = false; editorOpen.value = true }
+function editEvent() { if (!canManage.value || !detail.value || detail.value.user_id !== null || detail.value.concert_event_id !== null) return; editingEvent.value = detail.value; detailOpen.value = false; editorOpen.value = true }
 const mutating = ref(false)
 const deleteOpen = ref(false)
 const deleteError = ref('')
@@ -226,14 +227,14 @@ const noticeOpen = ref(false)
 function announce(message: string) { notice.value = message; noticeOpen.value = true }
 async function onSaved() { editorOpen.value = false; detailOpen.value = false; announce('事件已保存'); await loadEvents() }
 async function changeStatus() {
-  if (!canManage.value || !detail.value || detail.value.user_id !== null || mutating.value) return
+  if (!canManage.value || !detail.value || detail.value.user_id !== null || detail.value.concert_event_id !== null || mutating.value) return
   mutating.value = true; detailError.value = ''
   try { await api.status(detail.value.id, detail.value.status === 'active' ? 'cancelled' : 'active'); detailOpen.value = false; announce('事件状态已更新'); await loadEvents() }
   catch (error) { detailError.value = error instanceof Error ? error.message : '操作失败。' }
   finally { mutating.value = false }
 }
 async function removeEvent() {
-  if (!canManage.value || !detail.value || detail.value.user_id !== null || mutating.value) return
+  if (!canManage.value || !detail.value || detail.value.user_id !== null || detail.value.concert_event_id !== null || mutating.value) return
   mutating.value = true; deleteError.value = ''
   try { await api.remove(detail.value.id); deleteOpen.value = false; detailOpen.value = false; announce('事件已删除'); await loadEvents() }
   catch (error) { deleteError.value = error instanceof Error ? error.message : '删除失败。' }

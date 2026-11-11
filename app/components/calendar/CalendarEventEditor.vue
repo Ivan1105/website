@@ -55,7 +55,7 @@ const error = ref('')
 function adjustEndDate() { if (form.end_date < form.start_date) form.end_date = form.start_date }
 const normalizeTime = (value: string | null) => value ? (value.length === 5 ? `${value}:00` : value) : null
 async function save() {
-  if (saving.value || !props.canManage || (props.event && props.event.user_id !== null)) return
+  if (saving.value || !props.canManage || (props.event && (props.event.user_id !== null || props.event.concert_event_id !== null))) return
   const input: CalendarInput = {
     ...form, title: form.title.trim(), timezone: form.timezone?.trim() ?? '',
     description: form.description?.trim() || null, source_url: form.source_url?.trim() || null,

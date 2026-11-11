@@ -17,7 +17,7 @@ test('月历为周一开始的六周网格，覆盖跨年和闰日', () => {
 })
 test('跨日事件覆盖两端，重复事件使用实际发生日期', () => {
   const event: CalendarOccurrence = {
-    ...input, id: 1, user_id: null, event_id: 1, created_at: '', updated_at: '',
+    ...input, id: 1, user_id: null, concert_event_id: null, event_id: 1, created_at: '', updated_at: '',
     occurrence_start_date: '2028-02-29', occurrence_end_date: '2028-03-01',
   }
   assert.equal(eventsOnDate([event], '2028-02-29').length, 1)
