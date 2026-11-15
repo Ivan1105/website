@@ -5,13 +5,13 @@ import { normalizeMonitorUrl, prepareMonitorPages } from '@/utils/activity'
 const props = defineProps<{ activity: ActivityDetail; saving: boolean; error: string }>()
 const emit = defineEmits<{ save: [patch: ActivityPatch]; cancel: [] }>()
 let nextKey = 0
-const form = reactive({ original_title: props.activity.original_title, chinese_title: props.activity.chinese_title ?? '', summary: props.activity.summary ?? '',
+const form = reactive({ activity_status: props.activity.activity_status, original_title: props.activity.original_title, chinese_title: props.activity.chinese_title ?? '', summary: props.activity.summary ?? '',
   pages: props.activity.monitor_pages.map(page => ({ key: nextKey++, name: page.name, url: page.url })),
   official_url_is_specific: !!props.activity.official_url_is_specific, monitor_enabled: !!props.activity.monitor_enabled })
 const comparable = (url: string) => { try { return normalizeMonitorUrl(url) } catch { return url.trim() } }
 const changed = computed(() => form.pages.map(page => comparable(page.url)).sort().join('\n') !== props.activity.monitor_pages.map(page => page.url).sort().join('\n'))
-const canMonitor = computed(() => !changed.value && form.pages.length > 0 && props.activity.review_status === 'approved')
-watch(changed, value => { if (value) form.monitor_enabled = false })
+const canMonitor = computed(() => !changed.value && form.activity_status === 'ongoing' && props.activity.activity_status === 'ongoing' && form.pages.length > 0 && props.activity.review_status === 'approved')
+watch([changed, () => form.activity_status], ([value]) => { if (value || form.activity_status !== props.activity.activity_status || form.activity_status === 'ended') form.monitor_enabled = false })
 const validation = ref('')
 function move(index: number, offset: number) {
   const row = form.pages.splice(index, 1)[0]
@@ -22,7 +22,7 @@ function submit() {
   if (!form.original_title.trim()) { validation.value = '请填写原文标题'; return }
   try {
     const pages = prepareMonitorPages(form.pages)
-    emit('save', { original_title: form.original_title.trim(), chinese_title: form.chinese_title.trim() || null, summary: form.summary.trim() || null,
+    emit('save', { activity_status: form.activity_status, original_title: form.original_title.trim(), chinese_title: form.chinese_title.trim() || null, summary: form.summary.trim() || null,
       monitor_pages: pages, official_url_is_specific: pages.length > 0 && form.official_url_is_specific,
       ...(canMonitor.value ? { monitor_enabled: form.monitor_enabled } : {}) })
   } catch (error) { validation.value = error instanceof Error ? error.message : '请检查监控页面配置' }
@@ -33,6 +33,8 @@ function submit() {
     <v-form :disabled="saving" @submit.prevent="submit">
       <v-card-text>
         <v-alert v-if="error || validation" type="error" variant="tonal" class="mb-4">{{ error || validation }}</v-alert>
+        <v-select v-model="form.activity_status" label="活动状态" :items="[{ title: '进行中', value: 'ongoing' }, { title: '已结束', value: 'ended' }]" />
+        <v-alert v-if="form.activity_status === 'ended' || props.activity.activity_status === 'ended'" type="info" variant="tonal" class="mb-4">标记已结束会关闭全部页面监控；恢复进行中仍保持关闭，保存后请手动开启。历史公告和快照保留。</v-alert>
         <v-text-field v-model="form.original_title" label="原文标题（必填）" maxlength="1024" />
         <v-text-field v-model="form.chinese_title" label="中文标题" maxlength="1024" />
         <v-textarea v-model="form.summary" label="摘要" maxlength="10000" rows="4" />

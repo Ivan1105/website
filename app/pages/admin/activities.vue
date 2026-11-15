@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useActivityApi, type Activity, type ActivityDetail, type ActivityPatch, type Announcement, type CrawlRun, type ReviewStatus } from '@/api/activity'
+import { useActivityApi, type Activity, type ActivityDetail, type ActivityPatch, type Announcement, type CrawlRun, type ReviewStatus, type ActivityStatus } from '@/api/activity'
 import { isApiError } from '@/api/http'
 import { activityDate, activityLabel, activityLink, activityTime } from '@/utils/activity'
 import ActivityEditor from '@/components/admin/ActivityEditor.vue'
@@ -11,6 +11,7 @@ const api = useActivityApi()
 type Section = 'events' | 'announcements' | 'runs'
 const section = ref<Section>('events')
 const search = ref(''), review = ref<ReviewStatus | null>(null), importance = ref<string | null>(null), kind = ref<string | null>(null), generation = ref<string | null>(null)
+const activityStatus = ref<ActivityStatus | null>(null)
 const from = ref(''), to = ref('')
 const events = ref<Activity[]>([]), announcements = ref<Announcement[]>([]), runs = ref<CrawlRun[]>([])
 const pagination = reactive({ page: 0, page_size: 20, total: 0, has_more: false })
@@ -41,7 +42,7 @@ async function load(page = 0) {
     if (current !== 'events' && from.value && to.value && from.value > to.value) throw new Error('起始日期不得晚于结束日期')
     const query = { page, page_size: 20, ...(current !== 'runs' && (search.value ?? '').trim() ? { q: (search.value ?? '').trim() } : {}),
       ...(current !== 'events' ? { from: activityDate(from.value), to: activityDate(to.value, true) } : {}) }
-    const result = current === 'events' ? await api.events({ ...query, review_status: review.value ?? undefined }) : current === 'announcements' ? await api.announcements({ ...query, importance: importance.value ?? undefined, announcement_type: kind.value ?? undefined, generation_status: generation.value ?? undefined }) : await api.runs(query)
+    const result = current === 'events' ? await api.events({ ...query, activity_status: activityStatus.value ?? undefined, review_status: review.value ?? undefined }) : current === 'announcements' ? await api.announcements({ ...query, importance: importance.value ?? undefined, announcement_type: kind.value ?? undefined, generation_status: generation.value ?? undefined }) : await api.runs(query)
     if (version !== requestVersion) return
     if (current === 'events') events.value = result.items as Activity[]
     else if (current === 'announcements') announcements.value = result.items as Announcement[]
@@ -105,7 +106,7 @@ async function start() {
   } catch (e) { error.value = failure(e); if (isApiError(e) && e.status === 409) await refreshRuns() }
   finally { starting.value = false }
 }
-watch([section, review, importance, kind, generation, from, to], () => { void load(0) })
+watch([section, activityStatus, review, importance, kind, generation, from, to], () => { void load(0) })
 onMounted(() => { void load(); void refreshRuns() })
 onBeforeUnmount(() => { requestVersion++; detailVersion++ })
 </script>
@@ -121,6 +122,7 @@ onBeforeUnmount(() => { requestVersion++; detailVersion++ })
       <v-tabs v-model="section" color="secondary" show-arrows><v-tab value="events">活动信息</v-tab><v-tab value="announcements">公告</v-tab><v-tab value="runs">采集记录</v-tab></v-tabs>
       <v-form class="filters" @submit.prevent="load(0)">
         <v-text-field v-if="section !== 'runs'" v-model="search" label="关键词" clearable hide-details @click:clear="search = ''; load(0)" />
+        <v-select v-if="section === 'events'" v-model="activityStatus" label="活动状态" :items="options(['ongoing', 'ended'])" clearable hide-details />
         <v-select v-if="section === 'events'" v-model="review" label="审批状态" :items="options(['pending', 'approved', 'rejected'])" clearable hide-details />
         <template v-if="section === 'announcements'">
           <v-select v-model="importance" label="重要程度" :items="options(['high', 'medium', 'low'])" clearable hide-details />
@@ -135,8 +137,8 @@ onBeforeUnmount(() => { requestVersion++; detailVersion++ })
       <div v-if="!rowsExist" class="empty" aria-live="polite">{{ loading ? '正在加载…' : error ? '列表加载失败' : '暂无符合条件的记录' }}</div>
       <div v-else class="table-wrap" :aria-busy="loading">
         <v-table v-if="section === 'events'" hover>
-          <thead><tr><th>活动标题</th><th>监控页面</th><th>审批</th><th>监控</th><th>更新时间（北京时间）</th><th>操作</th></tr></thead>
-          <tbody><tr v-for="item in events" :key="item.id"><td class="title-cell">{{ item.chinese_title || item.original_title }}<small>#{{ item.id }}</small></td><td><small>{{ item.monitor_page_count }} 个页面</small><a v-if="activityLink(item.official_url)" :href="activityLink(item.official_url)" target="_blank" rel="noopener noreferrer">打开首个页面</a><span v-else>—</span></td><td><v-chip size="small" :color="item.review_status === 'approved' ? 'success' : undefined">{{ activityLabel(item.review_status) }}</v-chip></td><td>{{ item.monitor_enabled ? '开启' : '关闭' }}</td><td>{{ activityTime(item.updated_at) }}</td><td><div class="row-actions"><v-btn variant="text" size="small" @click="openDetail('events', item.id)">查看与管理</v-btn><v-btn variant="tonal" color="primary" size="small" :aria-label="`批准活动 #${item.id}`" :loading="quickReviewId === item.id && reviewAction === 'approved'" :disabled="saving || quickReviewId !== null || reviewOpen || item.review_status === 'approved'" @click="quickReview(item, 'approved')">批准</v-btn><v-btn variant="text" color="error" size="small" :aria-label="`拒绝活动 #${item.id}`" :loading="quickReviewId === item.id && reviewAction === 'rejected'" :disabled="saving || quickReviewId !== null || reviewOpen || item.review_status === 'rejected'" @click="quickReview(item, 'rejected')">拒绝</v-btn></div></td></tr></tbody>
+          <thead><tr><th>活动标题</th><th>监控页面</th><th>活动状态</th><th>审批</th><th>监控</th><th>更新时间（北京时间）</th><th>操作</th></tr></thead>
+          <tbody><tr v-for="item in events" :key="item.id"><td class="title-cell">{{ item.chinese_title || item.original_title }}<small>#{{ item.id }}</small></td><td><small>{{ item.monitor_page_count }} 个页面</small><a v-if="activityLink(item.official_url)" :href="activityLink(item.official_url)" target="_blank" rel="noopener noreferrer">打开首个页面</a><span v-else>—</span></td><td><v-chip size="small" :color="item.activity_status === 'ended' ? undefined : 'primary'">{{ activityLabel(item.activity_status) }}</v-chip></td><td><v-chip size="small" :color="item.review_status === 'approved' ? 'success' : undefined">{{ activityLabel(item.review_status) }}</v-chip></td><td>{{ item.monitor_enabled ? '开启' : '关闭' }}</td><td>{{ activityTime(item.updated_at) }}</td><td><div class="row-actions"><v-btn variant="text" size="small" @click="openDetail('events', item.id)">查看与管理</v-btn><v-btn variant="tonal" color="primary" size="small" :aria-label="`批准活动 #${item.id}`" :loading="quickReviewId === item.id && reviewAction === 'approved'" :disabled="saving || quickReviewId !== null || reviewOpen || item.review_status === 'approved'" @click="quickReview(item, 'approved')">批准</v-btn><v-btn variant="text" color="error" size="small" :aria-label="`拒绝活动 #${item.id}`" :loading="quickReviewId === item.id && reviewAction === 'rejected'" :disabled="saving || quickReviewId !== null || reviewOpen || item.review_status === 'rejected'" @click="quickReview(item, 'rejected')">拒绝</v-btn></div></td></tr></tbody>
         </v-table>
         <v-table v-else-if="section === 'announcements'" hover>
           <thead><tr><th>公告标题</th><th>关联活动</th><th>重要程度</th><th>类型</th><th>生成状态</th><th>发现时间（北京时间）</th><th>操作</th></tr></thead>

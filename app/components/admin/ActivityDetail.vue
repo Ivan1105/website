@@ -8,6 +8,7 @@ defineProps<{ activity: ActivityDetail }>()
     <h3>{{ activity.original_title }}</h3>
     <p>{{ activity.chinese_title || '暂无中文标题' }}</p>
     <p class="preserve">{{ activity.summary || '暂无摘要' }}</p>
+    <p>活动状态：{{ activityLabel(activity.activity_status) }}</p>
     <p>审批：{{ activityLabel(activity.review_status) }} · {{ activityTime(activity.reviewed_at) }}（北京时间）</p>
     <p>审批人编号：{{ activity.reviewed_by ?? '—' }} · 备注：{{ activity.review_note || '—' }}</p>
     <h3>监控页面（{{ activity.monitor_pages.length }}）</h3>

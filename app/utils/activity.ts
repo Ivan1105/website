@@ -1,4 +1,5 @@
 export const activityLabels: Record<string, string> = {
+  ongoing: '进行中', ended: '已结束',
   pending: '待处理', approved: '已批准', rejected: '已拒绝', ready: '已生成', failed: '失败',
   running: '执行中', succeeded: '成功', completed: '已归档', partial: '部分失败', interrupted: '已中断',
   high: '高', medium: '中', low: '低', discovery: '首次新闻', update: '官网更新',

@@ -6,7 +6,9 @@ export interface MonitorPage extends MonitorPageInput {
   id: number; activity_id: number; sort_order: number
   last_checked_at: string | null; last_succeeded_at: string | null; last_error: string | null
 }
+export type ActivityStatus = 'ongoing' | 'ended'
 export interface Activity {
+  activity_status: ActivityStatus
   id: number
   original_title: string
   chinese_title: string | null
@@ -60,10 +62,11 @@ export interface CrawlRun {
 }
 export interface ActivityPage<T> { items: T[]; pagination: { page: number; page_size: number; total: number; has_more: boolean } }
 export interface ActivityQuery {
-  page: number; page_size: number; q?: string; review_status?: ReviewStatus
+  page: number; page_size: number; activity_status?: ActivityStatus; q?: string; review_status?: ReviewStatus
   importance?: string; announcement_type?: string; generation_status?: string; from?: string; to?: string
 }
 export interface ActivityPatch {
+  activity_status: ActivityStatus
   original_title: string; chinese_title: string | null; summary: string | null
   monitor_pages: MonitorPageInput[]; official_url_is_specific: boolean; monitor_enabled?: boolean
 }
