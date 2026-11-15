@@ -32,6 +32,7 @@ export interface ActivityDetail extends Activity {
   snapshots: { id: number; version_no: number; fetched_at: string; diff_text: string | null; page_url: string; page_name: string }[]
 }
 export interface Announcement {
+  push_batch_id?: number | null
   page_name?: string | null
   id: number
   activity_id: number
@@ -70,6 +71,20 @@ export interface ActivityPatch {
   original_title: string; chinese_title: string | null; summary: string | null
   monitor_pages: MonitorPageInput[]; official_url_is_specific: boolean; monitor_enabled?: boolean
 }
+export type ActivityDeliveryStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'unknown' | 'expired' | 'cancelled'
+export interface ActivityPushBatch {
+  id: number; announcement_id: number; trigger_type: 'automatic' | 'manual'
+  target_count: number; created_at: string; expires_at: string
+}
+export interface ActivityPushOverview {
+  can_push: boolean; reason: string | null; target_count: number; batch: ActivityPushBatch | null
+  counts: Partial<Record<ActivityDeliveryStatus, number>>
+  deliveries: {
+    id: number; group_user_id: number; group_name: string; status: ActivityDeliveryStatus
+    generation_status: 'pending' | 'generating' | 'ready' | 'failed'; attempt_count: number
+    generation_error_count: number; sent_at: string | null; expires_at: string; last_error: string | null
+  }[]
+}
 export function useActivityApi() {
   const { $api } = useHttp()
   const get = async <T>(path: string, query?: ActivityQuery) => unwrap(await $api<Envelope<T>>(`/admin/activities/${path}`, { query, retry: 0 }))
@@ -78,6 +93,8 @@ export function useActivityApi() {
     event: (id: number) => get<ActivityDetail>(`events/${id}`),
     announcements: (query: ActivityQuery) => get<ActivityPage<Announcement>>('announcements', query),
     announcement: (id: number) => get<Announcement>(`announcements/${id}`),
+    pushOverview: (id: number) => get<ActivityPushOverview>(`announcements/${id}/push`),
+    push: async (id: number) => unwrap(await $api<Envelope<ActivityPushBatch>>(`/admin/activities/announcements/${id}/push`, { method: 'POST', retry: 0 })),
     runs: (query: ActivityQuery) => get<ActivityPage<CrawlRun>>('crawl-runs', query),
     run: (id: number) => get<CrawlRun>(`crawl-runs/${id}`),
     update: async (id: number, body: ActivityPatch) => unwrap(await $api<Envelope<Activity>>(`/admin/activities/events/${id}`, { method: 'PATCH', body, retry: 0 })),

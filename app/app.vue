@@ -101,6 +101,7 @@ const notificationTitles = {
   proactive: '主动消息',
   journal: '日记已完成',
   mail: '新邮件',
+  activity: '官方公告',
 } as const
 const notificationTitle = computed(() => {
   const source = notificationStore.activeSnackbarNotification?.source

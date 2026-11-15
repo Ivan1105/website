@@ -5,6 +5,7 @@ import { activityDate, activityLabel, activityLink, activityTime } from '@/utils
 import ActivityEditor from '@/components/admin/ActivityEditor.vue'
 import ActivityReview from '@/components/admin/ActivityReview.vue'
 import ActivityDetails from '@/components/admin/ActivityDetail.vue'
+import ActivityAnnouncementPush from '@/components/admin/ActivityAnnouncementPush.vue'
 
 useSeoMeta({ title: '官方新闻与活动 · 管理中心' })
 const api = useActivityApi()
@@ -114,7 +115,7 @@ onBeforeUnmount(() => { requestVersion++; detailVersion++ })
 <template>
   <div class="activity-page site-container">
     <header class="activity-heading">
-      <div><p class="eyebrow">OFFICIAL NEWS / 官方资讯</p><h1>活动与公告<span>。</span></h1><p class="muted">每天北京时间12:00、21:00采集官方来源，仅生成公告。</p></div>
+      <div><p class="eyebrow">OFFICIAL NEWS / 官方资讯</p><h1>活动与公告<span>。</span></h1><p class="muted">每天北京时间12:00、21:00采集官方来源，高重要度公告自动推送到演出订阅群。</p></div>
       <div class="actions"><v-btn to="/admin" variant="text" prepend-icon="mdi-arrow-left">管理中心</v-btn><v-btn color="primary" prepend-icon="mdi-download-network-outline" :loading="starting" :disabled="hasRunning" @click="start">{{ hasRunning ? '采集执行中' : '手动采集' }}</v-btn></div>
     </header>
     <v-alert v-if="message" type="success" variant="tonal" closable class="mb-4" @click:close="message = ''">{{ message }}</v-alert>
@@ -141,8 +142,8 @@ onBeforeUnmount(() => { requestVersion++; detailVersion++ })
           <tbody><tr v-for="item in events" :key="item.id"><td class="title-cell">{{ item.chinese_title || item.original_title }}<small>#{{ item.id }}</small></td><td><small>{{ item.monitor_page_count }} 个页面</small><a v-if="activityLink(item.official_url)" :href="activityLink(item.official_url)" target="_blank" rel="noopener noreferrer">打开首个页面</a><span v-else>—</span></td><td><v-chip size="small" :color="item.activity_status === 'ended' ? undefined : 'primary'">{{ activityLabel(item.activity_status) }}</v-chip></td><td><v-chip size="small" :color="item.review_status === 'approved' ? 'success' : undefined">{{ activityLabel(item.review_status) }}</v-chip></td><td>{{ item.monitor_enabled ? '开启' : '关闭' }}</td><td>{{ activityTime(item.updated_at) }}</td><td><div class="row-actions"><v-btn variant="text" size="small" @click="openDetail('events', item.id)">查看与管理</v-btn><v-btn variant="tonal" color="primary" size="small" :aria-label="`批准活动 #${item.id}`" :loading="quickReviewId === item.id && reviewAction === 'approved'" :disabled="saving || quickReviewId !== null || reviewOpen || item.review_status === 'approved'" @click="quickReview(item, 'approved')">批准</v-btn><v-btn variant="text" color="error" size="small" :aria-label="`拒绝活动 #${item.id}`" :loading="quickReviewId === item.id && reviewAction === 'rejected'" :disabled="saving || quickReviewId !== null || reviewOpen || item.review_status === 'rejected'" @click="quickReview(item, 'rejected')">拒绝</v-btn></div></td></tr></tbody>
         </v-table>
         <v-table v-else-if="section === 'announcements'" hover>
-          <thead><tr><th>公告标题</th><th>关联活动</th><th>重要程度</th><th>类型</th><th>生成状态</th><th>发现时间（北京时间）</th><th>操作</th></tr></thead>
-          <tbody><tr v-for="item in announcements" :key="item.id"><td class="title-cell">{{ item.title || '尚未生成标题' }}</td><td><v-btn variant="text" size="small" @click="openDetail('events', item.activity_id)">#{{ item.activity_id }}</v-btn></td><td><v-chip size="small" :color="item.importance === 'high' ? 'error' : undefined">{{ activityLabel(item.importance) }}</v-chip></td><td>{{ activityLabel(item.announcement_type) }}</td><td>{{ activityLabel(item.generation_status) }}</td><td>{{ activityTime(item.discovered_at) }}</td><td><v-btn variant="text" size="small" @click="openDetail('announcements', item.id)">查看</v-btn></td></tr></tbody>
+          <thead><tr><th>公告标题</th><th>关联活动</th><th>重要程度</th><th>类型</th><th>生成状态</th><th>QQ群推送</th><th>发现时间（北京时间）</th><th>操作</th></tr></thead>
+          <tbody><tr v-for="item in announcements" :key="item.id"><td class="title-cell">{{ item.title || '尚未生成标题' }}</td><td><v-btn variant="text" size="small" @click="openDetail('events', item.activity_id)">#{{ item.activity_id }}</v-btn></td><td><v-chip size="small" :color="item.importance === 'high' ? 'error' : undefined">{{ activityLabel(item.importance) }}</v-chip></td><td>{{ activityLabel(item.announcement_type) }}</td><td>{{ activityLabel(item.generation_status) }}</td><td>{{ item.push_batch_id ? '已触发（查看群状态）' : '尚未触发' }}</td><td>{{ activityTime(item.discovered_at) }}</td><td><v-btn variant="text" size="small" @click="openDetail('announcements', item.id)">查看 / 推送</v-btn></td></tr></tbody>
         </v-table>
         <v-table v-else hover>
           <thead><tr><th>批次</th><th>触发</th><th>状态</th><th>开始 / 结束（北京时间）</th><th>新增</th><th>变化</th><th>公告</th><th>失败</th><th>操作</th></tr></thead>
@@ -165,6 +166,7 @@ onBeforeUnmount(() => { requestVersion++; detailVersion++ })
             <p v-if="selectedAnnouncement.page_name">变化页面：{{ selectedAnnouncement.page_name }}</p><p>来源发布时间：{{ activityTime(selectedAnnouncement.source_published_at) }}</p><p>发现时间：{{ activityTime(selectedAnnouncement.discovered_at) }}</p><p>生成时间：{{ activityTime(selectedAnnouncement.generated_at) }}（以上均为北京时间）</p>
             <a v-if="activityLink(selectedAnnouncement.source_url)" :href="activityLink(selectedAnnouncement.source_url)" target="_blank" rel="noopener noreferrer">查看官方来源</a>
             <v-alert v-if="selectedAnnouncement.last_error" type="error" variant="tonal">{{ selectedAnnouncement.last_error }}</v-alert>
+            <ActivityAnnouncementPush :key="selectedAnnouncement.id" :announcement-id="selectedAnnouncement.id" @changed="load(pagination.page)" />
           </div>
           <div v-else-if="selectedRun" class="detail-content">
             <h3>批次 #{{ selectedRun.id }} · {{ activityLabel(selectedRun.status) }}</h3><p>触发方式：{{ selectedRun.trigger_type === 'manual' ? '管理员手动' : '定时任务' }}</p>
