@@ -4,9 +4,14 @@
       <header class="admin-home-heading">
         <p class="eyebrow">ADMIN / 管理中心</p>
         <h1 id="admin-home-title">选择管理区域<span>。</span></h1>
-        <p class="muted">管理用户账户，或维护 Miku 的演唱会资料库。</p>
+        <p class="muted">管理用户账户、演唱会资料与官方新闻公告。</p>
       </header>
       <div class="admin-home-grid">
+        <nuxt-link to="/admin/activities" class="admin-entry surface-card">
+          <span class="admin-entry-icon"><v-icon icon="mdi-newspaper-variant-outline" size="30" /></span>
+          <div><p class="eyebrow">OFFICIAL NEWS</p><h2>活动与公告</h2><p class="muted">编辑审批活动、查看公告并管理官方新闻采集。</p></div>
+          <v-icon icon="mdi-arrow-right" class="admin-entry-arrow" />
+        </nuxt-link>
         <nuxt-link to="/admin/users" class="admin-entry surface-card">
           <span class="admin-entry-icon"><v-icon icon="mdi-account-group-outline" size="30" /></span>
           <div><p class="eyebrow">USERS</p><h2>用户管理</h2><p class="muted">查看用户、调整账户状态并重置密码。</p></div>
