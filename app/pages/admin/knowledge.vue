@@ -56,7 +56,7 @@
 
         <div v-else class="knowledge-table-wrap" :aria-busy="loading">
           <v-table class="knowledge-table" hover>
-            <thead><tr><th v-if="section === 'songs'" class="vocalist-column"><span class="sr-only">歌手颜色</span></th><th>{{ currentConfig.primaryColumn }}</th><th>{{ currentConfig.secondaryColumn }}</th><th v-if="section === 'events'">葱含量</th><th>状态</th><th class="actions-column">操作</th></tr></thead>
+            <thead><tr><th v-if="section === 'songs'" class="vocalist-column"><span class="sr-only">歌手颜色</span></th><th>{{ currentConfig.primaryColumn }}</th><th>{{ currentConfig.secondaryColumn }}</th><th v-if="section === 'events'">含葱量</th><th>状态</th><th class="actions-column">操作</th></tr></thead>
             <tbody>
               <tr v-for="item in items" :key="`${section}-${item.id}`">
                 <td v-if="section === 'songs'" class="vocalist-column">
@@ -81,7 +81,7 @@
                   </div>
                 </td>
                 <td>{{ secondaryText(item) }}</td>
-                <td v-if="section === 'events'">{{ isEvent(item) && item.miku_percent !== null ? `${item.miku_percent}%` : '—' }}</td>
+                <td v-if="section === 'events'">{{ isEvent(item) && item.miku_percent !== null ? `${item.miku_percent}%（${item.miku_solo_count}/${item.setlist_count}）` : '—' }}</td>
                 <td><v-chip size="small" variant="tonal" :color="statusColor(item)">{{ statusText(item) }}</v-chip></td>
                 <td class="actions-column">
                   <v-btn
@@ -118,11 +118,12 @@
     </v-navigation-drawer>
 
     <v-navigation-drawer v-model="setlistDrawerOpen" location="right" temporary :width="mobile ? '100%' : 560" class="setlist-drawer">
-      <header class="setlist-drawer-header"><div><p class="eyebrow">SETLIST / 歌单</p><h2>{{ setlistEvent ? primaryText(setlistEvent) : '场次歌单' }}</h2><p v-if="setlistEvent" class="muted">{{ secondaryText(setlistEvent) }}</p></div><v-btn icon="mdi-close" variant="text" aria-label="关闭歌单" @click="closeSetlist" /></header>
+      <header class="setlist-drawer-header"><div><p class="eyebrow">SETLIST / 歌单</p><h2>{{ setlistEvent ? primaryText(setlistEvent) : '场次歌单' }}</h2><p v-if="setlistEvent" class="muted">{{ secondaryText(setlistEvent) }}</p><div class="setlist-controls"><span v-if="setlistEvent" class="muted">含葱量：{{ setlistEvent.miku_percent !== null ? `${setlistEvent.miku_percent}%` : '—' }}<span v-if="!setlistLoading && !setlistError">（{{ mikuSoloItems.length }}/{{ setlistItems.length }}）</span></span><v-switch v-model="mikuOnly" label="一键去渍" color="primary" density="compact" hide-details /></div></div><v-btn icon="mdi-close" variant="text" aria-label="关闭歌单" @click="closeSetlist" /></header>
       <v-alert v-if="setlistError" type="error" variant="tonal" density="comfortable" class="setlist-alert">{{ setlistError }}<template #append><v-btn variant="text" size="small" @click="setlistEvent && loadSetlist(setlistEvent)">重试</v-btn></template></v-alert>
       <div v-if="setlistLoading" class="setlist-state" aria-live="polite"><v-progress-circular indeterminate color="primary" size="30" width="3" /><span>正在加载歌单…</span></div>
       <div v-else-if="!setlistError && !setlistItems.length" class="setlist-state"><v-icon icon="mdi-music-note-off-outline" size="34" /><span>该场次尚未维护歌单。</span></div>
-      <v-list v-else lines="two" class="setlist-list" aria-label="场次歌单"><v-list-item v-for="item in setlistItems" :key="item.id" class="setlist-item"><template #prepend><span class="setlist-vocalist-marker" role="img" :aria-label="`歌手颜色：${item.song?.singer || '其他或未设置'}`"><span v-for="color in setlistVocalistColors(item)" :key="color" class="setlist-vocalist-segment" :style="{ backgroundColor: `var(--vocalist-${color})` }" /></span><span class="setlist-position-wrap"><span class="setlist-position">{{ item.position }}</span><span v-if="item.is_tape_song" class="setlist-tape-mark" aria-label="彩带曲">🎊</span></span></template><v-list-item-title>{{ item.song?.title ?? `歌曲 #${item.song_id ?? '未知'}` }}<span v-if="item.version_label" class="setlist-version">（{{ item.version_label }}）</span></v-list-item-title><v-list-item-subtitle><span class="setlist-meta"><span>{{ [item.song?.singer || '歌手未设置', item.song?.producer].filter(Boolean).join(' / ') }}</span></span><span v-if="item.is_encore || item.is_medley || item.is_tape_song || item.notes" class="setlist-details">{{ [item.is_encore ? '返场' : '', item.is_medley ? 'Medley' : '', item.is_tape_song ? '彩带曲' : '', item.notes ?? ''].filter(Boolean).join(' · ') }}</span></v-list-item-subtitle></v-list-item></v-list>
+      <div v-else-if="!setlistError && !visibleSetlistItems.length" class="setlist-state">暂无 Miku 独唱曲目。</div>
+      <v-list v-else-if="!setlistError" lines="two" class="setlist-list" aria-label="场次歌单"><v-list-item v-for="item in visibleSetlistItems" :key="item.id" class="setlist-item"><template #prepend><span class="setlist-vocalist-marker" role="img" :aria-label="`歌手颜色：${item.song?.singer || '其他或未设置'}`"><span v-for="color in setlistVocalistColors(item)" :key="color" class="setlist-vocalist-segment" :style="{ backgroundColor: `var(--vocalist-${color})` }" /></span><span class="setlist-position-wrap"><span class="setlist-position">{{ item.position }}</span><span v-if="item.is_tape_song" class="setlist-tape-mark" aria-label="彩带曲">🎊</span></span></template><v-list-item-title>{{ item.song?.title ?? `歌曲 #${item.song_id ?? '未知'}` }}<span v-if="item.version_label" class="setlist-version">（{{ item.version_label }}）</span></v-list-item-title><v-list-item-subtitle><span class="setlist-meta"><span>{{ [item.song?.singer || '歌手未设置', item.song?.producer].filter(Boolean).join(' / ') }}</span></span><span v-if="item.is_encore || item.is_medley || item.is_tape_song || item.notes" class="setlist-details">{{ [item.is_encore ? '返场' : '', item.is_medley ? 'Medley' : '', item.is_tape_song ? '彩带曲' : '', item.notes ?? ''].filter(Boolean).join(' · ') }}</span></v-list-item-subtitle></v-list-item></v-list>
     </v-navigation-drawer>
 
     <v-dialog v-model="deleteOpen" max-width="520" :persistent="deleting">
@@ -217,6 +218,12 @@ const successMessage = ref('保存成功')
 const setlistDrawerOpen = ref(false)
 const setlistEvent = ref<EventDTO | null>(null)
 const setlistItems = ref<SetlistItemDTO[]>([])
+const mikuOnly = ref(false)
+const mikuSoloItems = computed(() => setlistItems.value.filter(item => {
+  const vocalists = setlistVocalistColors(item)
+  return vocalists.length === 1 && vocalists[0] === 'miku'
+}))
+const visibleSetlistItems = computed(() => mikuOnly.value ? mikuSoloItems.value : setlistItems.value)
 const setlistLoading = ref(false)
 const setlistError = ref<string | null>(null)
 const referenceEditorKey = computed(() => `${section.value}-${editingRecord.value?.id ?? 'new'}-${referenceEditorVersion.value}`)
@@ -315,7 +322,7 @@ function applyFilters() { void loadItems(0) }
 function clearSearch() { search.value = ''; void loadItems(0) }
 function openCreate() { referenceEditorVersion.value += 1; editingRecord.value = null; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
 function openEdit(item: KnowledgeRecord) { editingRecord.value = item; copyingRecord.value = null; dirty.value = false; editorOpen.value = true }
-function openSetlist(item: EventDTO) { runGuarded(() => { setlistEvent.value = item; setlistItems.value = []; setlistError.value = null; setlistDrawerOpen.value = true; void loadSetlist(item) }) }
+function openSetlist(item: EventDTO) { runGuarded(() => { setlistEvent.value = item; mikuOnly.value = false; setlistItems.value = []; setlistError.value = null; setlistDrawerOpen.value = true; void loadSetlist(item) }) }
 async function loadSetlist(event: EventDTO) {
   setlistLoading.value = true
   try {
@@ -529,6 +536,9 @@ function handleApiError(caught: unknown, fallback: string) {
 .setlist-drawer :deep(.v-navigation-drawer__content) { overflow-y: auto; }
 .setlist-drawer.v-navigation-drawer { transition: transform 240ms cubic-bezier(.4, 0, .2, 1) !important; }
 .setlist-drawer-header { padding: 24px 26px 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--site-border); }
+.setlist-drawer-header > div { flex: 1; min-width: 0; }
+.setlist-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.setlist-controls :deep(.v-input) { flex: 0 0 auto; }
 .setlist-drawer-header h2 { margin: 6px 0; font-size: 1.35rem; }
 .setlist-alert { margin: 18px 20px; }
 .setlist-state { min-height: 180px; padding: 32px 24px; display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--site-muted); text-align: center; }

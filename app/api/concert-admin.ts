@@ -174,6 +174,8 @@ export interface EventDTO extends BaseConcertDTO {
   confidence: Confidence
   notes: string | null
   miku_percent: number | null
+  miku_solo_count: number
+  setlist_count: number
 }
 
 export interface EventInput {

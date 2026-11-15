@@ -97,7 +97,7 @@ export function useActivityApi() {
     push: async (id: number) => unwrap(await $api<Envelope<ActivityPushBatch>>(`/admin/activities/announcements/${id}/push`, { method: 'POST', retry: 0 })),
     runs: (query: ActivityQuery) => get<ActivityPage<CrawlRun>>('crawl-runs', query),
     run: (id: number) => get<CrawlRun>(`crawl-runs/${id}`),
-    update: async (id: number, body: ActivityPatch) => unwrap(await $api<Envelope<Activity>>(`/admin/activities/events/${id}`, { method: 'PATCH', body, retry: 0 })),
+    update: async (id: number, body: Partial<ActivityPatch>) => unwrap(await $api<Envelope<Activity>>(`/admin/activities/events/${id}`, { method: 'PATCH', body, retry: 0 })),
     review: async (id: number, status: 'approved' | 'rejected', note: string) => unwrap(await $api<Envelope<Activity>>(`/admin/activities/events/${id}/review`, { method: 'POST', body: { status, note }, retry: 0 })),
     start: async () => unwrap(await $api<Envelope<CrawlRun>>('/admin/activities/crawl-runs', { method: 'POST', retry: 0 })),
   }

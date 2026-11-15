@@ -11,7 +11,7 @@ useSeoMeta({ title: '官方新闻与活动 · 管理中心' })
 const api = useActivityApi()
 type Section = 'events' | 'announcements' | 'runs'
 const section = ref<Section>('events')
-const search = ref(''), review = ref<ReviewStatus | null>(null), importance = ref<string | null>(null), kind = ref<string | null>(null), generation = ref<string | null>(null)
+const search = ref(''), review = ref<ReviewStatus | null>('pending'), importance = ref<string | null>(null), kind = ref<string | null>(null), generation = ref<string | null>(null)
 const activityStatus = ref<ActivityStatus | null>(null)
 const from = ref(''), to = ref('')
 const events = ref<Activity[]>([]), announcements = ref<Announcement[]>([]), runs = ref<CrawlRun[]>([])
@@ -21,7 +21,7 @@ const detailOpen = ref(false), editorOpen = ref(false), reviewOpen = ref(false),
 const selectedEvent = ref<ActivityDetail | null>(null), selectedAnnouncement = ref<Announcement | null>(null), selectedRun = ref<CrawlRun | null>(null)
 const detailKind = ref<Section>('events'), selectedId = ref(0), reviewAction = ref<'approved' | 'rejected'>('approved')
 const reviewEvent = ref<ActivityDetail | null>(null)
-const quickReviewId = ref<number | null>(null)
+const statusUpdatingId = ref<number | null>(null)
 let requestVersion = 0, detailVersion = 0
 const options = (values: string[]) => values.map(value => ({ title: activityLabel(value), value }))
 const activeRunning = ref(false)
@@ -64,36 +64,34 @@ async function openDetail(type: Section, id: number) {
   } catch (e) { if (version === detailVersion) detailError.value = failure(e) }
   finally { if (version === detailVersion) detailLoading.value = false }
 }
-async function mutate(operation: () => Promise<unknown>) {
+async function mutate(operation: () => Promise<unknown>, closeDetail = false) {
   if (saving.value) return
   saving.value = true; mutationError.value = ''
   try {
     await operation(); editorOpen.value = false; reviewOpen.value = false; message.value = '操作成功'
-    if (detailOpen.value && selectedEvent.value) await openDetail('events', selectedEvent.value.id)
+    if (closeDetail) detailOpen.value = false
+    else if (detailOpen.value && selectedEvent.value) await openDetail('events', selectedEvent.value.id)
     await load(pagination.page)
   } catch (e) { mutationError.value = failure(e); if (isApiError(e) && e.status === 409) await refreshRuns() }
   finally { saving.value = false }
 }
 function save(patch: ActivityPatch) { if (selectedEvent.value) { const id = selectedEvent.value.id; void mutate(() => api.update(id, patch)) } }
-function submitReview(note: string) { if (reviewEvent.value) { const id = reviewEvent.value.id; void mutate(() => api.review(id, reviewAction.value, note)) } }
+async function toggleArchive(item: Activity) {
+  if (saving.value) return
+  const status = item.activity_status === 'ended' ? 'ongoing' : 'ended'
+  saving.value = true; statusUpdatingId.value = item.id; error.value = ''; message.value = ''
+  try {
+    await api.update(item.id, { activity_status: status })
+    message.value = status === 'ended' ? '活动已归档' : '活动已恢复为进行中'
+    await load(pagination.page)
+  } catch (e) { error.value = failure(e); if (isApiError(e) && e.status === 409) await refreshRuns() }
+  finally { saving.value = false; statusUpdatingId.value = null }
+}
+function submitReview(note: string) { if (reviewEvent.value) { const id = reviewEvent.value.id; void mutate(() => api.review(id, reviewAction.value, note), true) } }
 function beginReview(status: 'approved' | 'rejected') {
-  if (!selectedEvent.value || saving.value || quickReviewId.value !== null) return
+  if (!selectedEvent.value || saving.value) return
   reviewEvent.value = selectedEvent.value
   mutationError.value = ''; reviewAction.value = status; reviewOpen.value = true
-}
-async function quickReview(item: Activity, status: 'approved' | 'rejected') {
-  if (saving.value || quickReviewId.value !== null || reviewOpen.value) return
-  quickReviewId.value = item.id; reviewAction.value = status; error.value = ''
-  try {
-    const latest = await api.event(item.id)
-    if (latest.review_status === status) {
-      message.value = `该活动已${status === 'approved' ? '批准' : '拒绝'}`
-      await load(pagination.page)
-      return
-    }
-    reviewEvent.value = latest; reviewAction.value = status; mutationError.value = ''; reviewOpen.value = true
-  } catch (e) { error.value = failure(e) }
-  finally { quickReviewId.value = null }
 }
 async function start() {
   if (starting.value || hasRunning.value) return
@@ -139,7 +137,7 @@ onBeforeUnmount(() => { requestVersion++; detailVersion++ })
       <div v-else class="table-wrap" :aria-busy="loading">
         <v-table v-if="section === 'events'" hover>
           <thead><tr><th>活动标题</th><th>监控页面</th><th>活动状态</th><th>审批</th><th>监控</th><th>更新时间（北京时间）</th><th>操作</th></tr></thead>
-          <tbody><tr v-for="item in events" :key="item.id"><td class="title-cell">{{ item.chinese_title || item.original_title }}<small>#{{ item.id }}</small></td><td><small>{{ item.monitor_page_count }} 个页面</small><a v-if="activityLink(item.official_url)" :href="activityLink(item.official_url)" target="_blank" rel="noopener noreferrer">打开首个页面</a><span v-else>—</span></td><td><v-chip size="small" :color="item.activity_status === 'ended' ? undefined : 'primary'">{{ activityLabel(item.activity_status) }}</v-chip></td><td><v-chip size="small" :color="item.review_status === 'approved' ? 'success' : undefined">{{ activityLabel(item.review_status) }}</v-chip></td><td>{{ item.monitor_enabled ? '开启' : '关闭' }}</td><td>{{ activityTime(item.updated_at) }}</td><td><div class="row-actions"><v-btn variant="text" size="small" @click="openDetail('events', item.id)">查看与管理</v-btn><v-btn variant="tonal" color="primary" size="small" :aria-label="`批准活动 #${item.id}`" :loading="quickReviewId === item.id && reviewAction === 'approved'" :disabled="saving || quickReviewId !== null || reviewOpen || item.review_status === 'approved'" @click="quickReview(item, 'approved')">批准</v-btn><v-btn variant="text" color="error" size="small" :aria-label="`拒绝活动 #${item.id}`" :loading="quickReviewId === item.id && reviewAction === 'rejected'" :disabled="saving || quickReviewId !== null || reviewOpen || item.review_status === 'rejected'" @click="quickReview(item, 'rejected')">拒绝</v-btn></div></td></tr></tbody>
+          <tbody><tr v-for="item in events" :key="item.id"><td class="title-cell">{{ item.chinese_title || item.original_title }}<small>#{{ item.id }}</small></td><td><small>{{ item.monitor_page_count }} 个页面</small><a v-if="activityLink(item.official_url)" :href="activityLink(item.official_url)" target="_blank" rel="noopener noreferrer">打开首个页面</a><span v-else>—</span></td><td><v-chip size="small" :color="item.activity_status === 'ended' ? undefined : 'primary'">{{ activityLabel(item.activity_status) }}</v-chip></td><td><v-chip size="small" :color="item.review_status === 'approved' ? 'success' : undefined">{{ activityLabel(item.review_status) }}</v-chip></td><td>{{ item.monitor_enabled ? '开启' : '关闭' }}</td><td>{{ activityTime(item.updated_at) }}</td><td><div class="row-actions"><v-btn variant="text" size="small" @click="openDetail('events', item.id)">查看与管理</v-btn><v-btn variant="tonal" color="primary" size="small" :aria-label="`${item.activity_status === 'ended' ? '恢复' : '归档'}活动 #${item.id}`" :loading="statusUpdatingId === item.id" :disabled="saving || loading" @click="toggleArchive(item)">{{ item.activity_status === 'ended' ? '恢复' : '归档' }}</v-btn></div></td></tr></tbody>
         </v-table>
         <v-table v-else-if="section === 'announcements'" hover>
           <thead><tr><th>公告标题</th><th>关联活动</th><th>重要程度</th><th>类型</th><th>生成状态</th><th>QQ群推送</th><th>发现时间（北京时间）</th><th>操作</th></tr></thead>
@@ -188,7 +186,7 @@ onBeforeUnmount(() => { requestVersion++; detailVersion++ })
 .activity-page { padding-block: 48px 72px; max-width: 1440px; }
 .activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
 h1 { font-size: clamp(2rem, 4vw, 3rem); margin: 4px 0 10px; letter-spacing: -.04em; } h1 span { color: #39c5bb; }
-.row-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 220px; padding-block: 8px; }
+.row-actions { display: flex; align-items: center; gap: 6px; padding-block: 8px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .filters { padding: 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .filters :deep(.v-input) { flex: 1 1 170px; }
