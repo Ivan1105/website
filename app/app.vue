@@ -102,9 +102,12 @@ const notificationTitles = {
   journal: '日记已完成',
   mail: '新邮件',
   activity: '官方公告',
+  system: '系统通知',
 } as const
 const notificationTitle = computed(() => {
-  const source = notificationStore.activeSnackbarNotification?.source
+  const notification = notificationStore.activeSnackbarNotification
+  if (notification?.type === 'system.notification') return notification.payload.title
+  const source = notification?.source
   return source ? notificationTitles[source] : '新消息'
 })
 const notificationSnackbarOpen = computed({
@@ -118,7 +121,12 @@ const openNotification = async () => {
   const notification = notificationStore.activeSnackbarNotification
   if (!notification) return
   notificationStore.dismissSnackbar()
-  await navigateTo({ path: '/chatbox', query: { thread: notification.thread_id } })
+  if (notification.type === 'system.notification') {
+    const target = notification.payload.target
+    await navigateTo({ path: '/admin/activities', query: { section: target.section, id: String(target.id) } })
+  } else {
+    await navigateTo({ path: '/chatbox', query: { thread: notification.thread_id } })
+  }
 }
 
 watch(() => appStore.userInfo?.user_id ?? null, (userId) => {

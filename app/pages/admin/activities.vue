@@ -9,6 +9,7 @@ import ActivityAnnouncementPush from '@/components/admin/ActivityAnnouncementPus
 
 useSeoMeta({ title: '官方新闻与活动 · 管理中心' })
 const api = useActivityApi()
+const route = useRoute()
 type Section = 'events' | 'announcements' | 'runs'
 const section = ref<Section>('events')
 const search = ref(''), review = ref<ReviewStatus | null>('pending'), importance = ref<string | null>(null), kind = ref<string | null>(null), generation = ref<string | null>(null)
@@ -106,7 +107,17 @@ async function start() {
   finally { starting.value = false }
 }
 watch([section, activityStatus, review, importance, kind, generation, from, to], () => { void load(0) })
-onMounted(() => { void load(); void refreshRuns() })
+async function openNotificationTarget() {
+  const targetSection = route.query.section
+  const rawId = route.query.id
+  if ((targetSection !== 'runs' && targetSection !== 'announcements') || typeof rawId !== 'string' || !/^\d+$/.test(rawId)) return
+  const id = Number(rawId)
+  if (!Number.isSafeInteger(id) || id <= 0) return
+  section.value = targetSection
+  await openDetail(targetSection, id)
+}
+watch(() => [route.query.section, route.query.id], () => { void openNotificationTarget() })
+onMounted(() => { void load(); void refreshRuns(); void openNotificationTarget() })
 onBeforeUnmount(() => { requestVersion++; detailVersion++ })
 </script>
 

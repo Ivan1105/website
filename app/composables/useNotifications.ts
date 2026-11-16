@@ -25,6 +25,10 @@ const LEASE_DURATION = 15_000
 const PRESENCE_MAX_AGE = 15_000
 const MAX_RECONNECT_DELAY = 30_000
 
+const shouldShowSnackbar = (source: NotificationData['source']) => (
+  source !== 'chat' && source !== 'reminder' && source !== 'journal'
+)
+
 const parseLease = (raw: string | null): { owner: string, expiresAt: number } | null => {
   if (!raw) return null
   try {
@@ -185,13 +189,15 @@ export const useNotificationService = () => {
     if (!initialCatchup) {
       const presences = activePresences()
       const targetVisible = presences.some(presence => (
-        presence.visible && presence.activeThreadId === notification.thread_id
+        notification.type === 'chat.message.ready' && presence.visible && presence.activeThreadId === notification.thread_id
       ))
 
-      store.incrementUnread(notification.thread_id)
-      post({ type: 'unread', unread: store.unreadByThread })
+      if (notification.type === 'chat.message.ready') {
+        store.incrementUnread(notification.thread_id)
+        post({ type: 'unread', unread: store.unreadByThread })
+      }
       publishNotification(notification)
-      if (!targetVisible) {
+      if (!targetVisible && shouldShowSnackbar(notification.source)) {
         const visibleTab = presences.find(presence => presence.visible)
         if (visibleTab) {
           if (visibleTab.tabId === tabId) store.enqueueSnackbar(notification)
@@ -332,7 +338,9 @@ export const useNotificationService = () => {
     else if (message.type === 'catchup-complete') store.markCatchupComplete()
     else if (message.type === 'unread') updateUnread(message.unread, false)
     else if (message.type === 'read') store.clearUnread(message.threadId)
-    else if (message.type === 'snackbar' && message.tabId === tabId) store.enqueueSnackbar(message.notification)
+    else if (message.type === 'snackbar' && message.tabId === tabId && shouldShowSnackbar(message.notification.source)) {
+      store.enqueueSnackbar(message.notification)
+    }
     else if (message.type === 'desktop-setting') {
       store.setDesktopEnabled(message.enabled)
       if (message.enabled) void startPushMessaging()

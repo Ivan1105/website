@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import type { NotificationData } from '@/api'
+import type { SystemNotificationPayload } from '@/api/notifications'
 
 interface SnackbarItem {
   id: string
@@ -7,9 +8,10 @@ interface SnackbarItem {
 }
 
 export interface PushRefreshSignal {
-  agentId: string
+  agentId: string | null
   eventId: string
-  threadId: string
+  threadId: string | null
+  system?: SystemNotificationPayload
 }
 
 const storageKey = (name: string, userId: number) => `notification:${name}:${userId}`

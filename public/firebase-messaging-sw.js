@@ -1,14 +1,28 @@
 /* global firebase */
 
+function isSystemNotification(data) {
+  return data && data.eventType === 'system.notification' && data.source === 'system'
+    && /^\d+$/.test(data.eventId || '')
+    && ['runs', 'announcements'].includes(data.section)
+    && /^\d+$/.test(data.targetId || '') && Number.isSafeInteger(Number(data.targetId)) && Number(data.targetId) > 0
+    && typeof data.notificationTitle === 'string' && !!data.notificationTitle.trim()
+    && typeof data.notificationBody === 'string' && !!data.notificationBody.trim()
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
   const data = event.notification.data
-  const target = new URL('/chatbox', self.location.origin)
-  if (data && typeof data.threadId === 'string' && data.threadId) {
+  const system = isSystemNotification(data)
+  const target = new URL(system ? '/admin/activities' : '/chatbox', self.location.origin)
+  if (system) {
+    target.searchParams.set('section', data.section)
+    target.searchParams.set('id', data.targetId)
+  }
+  if (!system && data && typeof data.threadId === 'string' && data.threadId) {
     target.searchParams.set('thread', data.threadId)
   }
-  if (data && typeof data.agentId === 'string' && data.agentId) {
+  if (!system && data && typeof data.agentId === 'string' && data.agentId) {
     target.searchParams.set('agent', data.agentId)
   }
 
@@ -46,6 +60,11 @@ if (hasConfig) {
 
   messaging.onBackgroundMessage((payload) => {
     const data = payload && payload.data
+    if (isSystemNotification(data)) {
+      return self.registration.showNotification(data.notificationTitle, {
+        body: data.notificationBody, icon: '/favicon.ico', tag: `miku-system:${data.eventId}`, data,
+      })
+    }
     if (!data
       || data.eventType !== 'chat.message.ready'
       || data.notificationTitle !== 'Miku'

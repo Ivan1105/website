@@ -1,17 +1,49 @@
 import { ApiError, getToken, unwrap, useHttp, type Envelope } from './http'
 
-export type NotificationSource = 'chat' | 'reminder' | 'proactive' | 'journal' | 'mail' | 'activity'
+export type NotificationSource = 'chat' | 'reminder' | 'proactive' | 'journal' | 'mail' | 'activity' | 'system'
 
-export interface NotificationData {
+interface NotificationBase {
   id: string
+  preview: string
+  created_at: string
+}
+
+export interface SystemNotificationPayload {
+  kind: 'activity.crawl.completed' | 'activity.announcement.ready'
+  title: string
+  body: string
+  target: { section: 'runs' | 'announcements', id: number }
+}
+
+export type NotificationData = NotificationBase & ({
   type: 'chat.message.ready'
-  source: NotificationSource
+  source: Exclude<NotificationSource, 'system'>
   agent_id: number
   thread_id: string
   run_id: string
   message_id: string | null
-  preview: string
-  created_at: string
+} | {
+  type: 'system.notification'
+  source: 'system'
+  agent_id: null
+  thread_id: null
+  run_id: null
+  message_id: null
+  payload: SystemNotificationPayload
+})
+
+export const parseSystemPayload = (value: unknown): SystemNotificationPayload => {
+  if (!value || typeof value !== 'object') throw new NotificationStreamError('系统通知数据格式错误', 200)
+  const payload = value as Record<string, unknown>
+  const target = payload.target as Record<string, unknown> | undefined
+  if (!target || typeof target !== 'object' || !Number.isSafeInteger(target.id) || (target.id as number) <= 0
+    || !((payload.kind === 'activity.crawl.completed' && target.section === 'runs')
+      || (payload.kind === 'activity.announcement.ready' && target.section === 'announcements'))) {
+    throw new NotificationStreamError('系统通知目标格式错误', 200)
+  }
+  return { kind: payload.kind as SystemNotificationPayload['kind'],
+    title: requireString(payload.title, 'title', value), body: requireString(payload.body, 'body', value),
+    target: { section: target.section as 'runs' | 'announcements', id: target.id as number } }
 }
 
 export interface NotificationPingData {
@@ -63,6 +95,15 @@ const parseNotification = (payload: unknown): NotificationData => {
   const source = event.source
   if (!UNSIGNED_INTEGER_PATTERN.test(id)) {
     throw new NotificationStreamError('通知字段 id 格式错误', 200, payload)
+  }
+  if (event.type === 'system.notification') {
+    if (source !== 'system' || event.agent_id !== null || event.thread_id !== null || event.run_id !== null || event.message_id !== null) {
+      throw new NotificationStreamError('系统通知关联字段格式错误', 200, payload)
+    }
+    const createdAt = requireString(event.created_at, 'created_at', payload)
+    if (Number.isNaN(Date.parse(createdAt))) throw new NotificationStreamError('通知字段 created_at 格式错误', 200, payload)
+    return { id, type: 'system.notification', source, agent_id: null, thread_id: null, run_id: null, message_id: null,
+      preview: typeof event.preview === 'string' ? event.preview : '', created_at: createdAt, payload: parseSystemPayload(event.payload) }
   }
   if (event.type !== 'chat.message.ready') {
     throw new NotificationStreamError('通知字段 type 格式错误', 200, payload)

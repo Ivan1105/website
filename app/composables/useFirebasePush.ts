@@ -10,6 +10,7 @@ import {
   type Unsubscribe,
 } from 'firebase/messaging'
 import { isApiError, useNotificationApi } from '@/api'
+import { parseSystemPayload } from '@/api/notifications'
 import type { PushRefreshSignal } from '@/stores/notifications'
 
 export type FirebasePushSupport = 'checking' | 'supported' | 'unconfigured' | 'unsupported'
@@ -52,6 +53,15 @@ const parsePushSignal = (payload: MessagePayload): PushRefreshSignal | null => {
   const messageId = data?.messageId
   const runId = data?.runId
   const threadId = data?.threadId
+  if (data?.eventType === 'system.notification') {
+    if (data.source !== 'system' || typeof eventId !== 'string' || !/^\d+$/.test(eventId)
+      || typeof data.targetId !== 'string' || !/^\d+$/.test(data.targetId)) return null
+    try {
+      const system = parseSystemPayload({ kind: data.section === 'runs' ? 'activity.crawl.completed' : 'activity.announcement.ready',
+        title: data.notificationTitle, body: data.notificationBody, target: { section: data.section, id: Number(data.targetId) } })
+      return { eventId, agentId: null, threadId: null, system }
+    } catch { return null }
+  }
   if (!data
     || data.eventType !== 'chat.message.ready'
     || data.notificationTitle !== 'Miku'
