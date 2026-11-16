@@ -265,18 +265,29 @@ onBeforeUnmount(() => {
   }
 })
 
+const listStates = new Map<string, { search: string; filter: string | null; page: number }>()
+const sectionTours = new Map<ConcertResource, number | null>()
+const listStateKey = (resource: ConcertResource, tourId: number | null) => `${resource}:${tourId ?? ''}`
+let listRequestVersion = 0
+
 watch(() => [route.query.section, route.query.tour_id] as const, ([sectionQuery, tourIdQuery]) => {
   const nextSection = parseSection(sectionQuery)
   const nextTourId = nextSection === 'events' ? parseTourId(tourIdQuery) : null
   if (nextSection === section.value && nextTourId === selectedTourId.value) return
+  listStates.set(listStateKey(section.value, selectedTourId.value), {
+    search: search.value, filter: filter.value, page: pagination.value.page,
+  })
+  sectionTours.set(section.value, selectedTourId.value)
+  const saved = listStates.get(listStateKey(nextSection, nextTourId))
   section.value = nextSection
   selectedTourId.value = nextTourId
   selectedTourName.value = null
-  search.value = ''
-  filter.value = null
+  search.value = saved?.search ?? ''
+  filter.value = saved?.filter ?? null
+  pagination.value = { page: saved?.page ?? 0, page_size: PAGE_SIZE, total: 0, has_more: false }
   items.value = []
   void loadSelectedTour()
-  void loadItems(0)
+  void loadItems(saved?.page ?? 0)
 })
 watch(dirty, value => { if (!value) pendingRoute.value = null })
 
@@ -294,7 +305,7 @@ onBeforeRouteLeave((to) => {
 })
 
 async function loadItems(page: number) {
-  if (loading.value) return
+  const version = ++listRequestVersion
   loading.value = true
   error.value = null
   try {
@@ -309,12 +320,13 @@ async function loadItems(page: number) {
         : section.value === 'venues' ? await concertAdminApi.listVenues(query)
           : section.value === 'songs' ? await concertAdminApi.listSongs(query)
             : await concertAdminApi.listSources(query)
+    if (version !== listRequestVersion) return
     items.value = result.items
     pagination.value = result.pagination
   } catch (caught) {
-    handleApiError(caught, '暂时无法加载资料，请稍后重试。')
+    if (version === listRequestVersion) handleApiError(caught, '暂时无法加载资料，请稍后重试。')
   } finally {
-    loading.value = false
+    if (version === listRequestVersion) loading.value = false
   }
 }
 
@@ -361,13 +373,13 @@ function requestCloseEditor() { runGuarded(() => { editorOpen.value = false; edi
 
 function requestSection(value: string) {
   const next = parseSection(value)
-  if (next === section.value && selectedTourId.value === null) return
+  if (next === section.value) return
   runGuarded(() => {
     editorOpen.value = false
     editingRecord.value = null
     copyingRecord.value = null
     dirty.value = false
-    void router.push({ query: { ...route.query, section: next, tour_id: undefined } })
+    void router.push({ query: { ...route.query, section: next, tour_id: next === 'events' ? sectionTours.get(next) ?? undefined : undefined } })
   })
 }
 
