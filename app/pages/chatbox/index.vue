@@ -87,7 +87,8 @@
             </v-list>
           </v-menu>
         </header>
-        <div ref="messagesAreaRef" class="messages-area" tabindex="0" aria-label="消息记录" :aria-busy="loading || sending">
+        <div ref="messagesAreaRef" class="messages-area" tabindex="0" aria-label="消息记录" :aria-busy="loading || sending"
+          @scroll.passive="onMessagesScroll" @load.capture="onMessageImageSettled" @error.capture="onMessageImageSettled">
           <div v-if="conversationsLoading || loading" class="chat-state" role="status">
             <v-progress-circular indeterminate color="secondary" size="28" width="2" /><p>正在加载{{ conversationsLoading ? '会话' : '消息' }}…</p>
           </div>
@@ -898,6 +899,7 @@ const currentConversationId = ref('')
 const currentMessages = ref<Message[]>([])
 const inputMessage = ref('')
 const messagesAreaRef = ref<HTMLElement | null>(null)
+let followingLatestMessages = true
 const loading = ref(false)
 const conversationsLoading = ref(true)
 const conversationsError = ref('')
@@ -1144,7 +1146,18 @@ const formatOAuthExpiresAt = (value: string) => {
   }).format(date)
 }
 const scrollToBottom = () => {
+  followingLatestMessages = true
   if (messagesAreaRef.value) messagesAreaRef.value.scrollTop = messagesAreaRef.value.scrollHeight
+}
+const onMessagesScroll = () => {
+  const area = messagesAreaRef.value
+  if (area) followingLatestMessages = area.scrollHeight - area.clientHeight - area.scrollTop <= 2
+}
+const onMessageImageSettled = (event: Event) => {
+  // Markdown images load after nextTick and can increase the message list's height.
+  if (event.target instanceof HTMLImageElement && followingLatestMessages && !loadingMore.value) {
+    scrollToBottom()
+  }
 }
 const toolCallLabel = (toolCall: ToolCallState) => {
   if (toolCall.status === 'running') return `开始工具调用【${toolCall.name}】`
@@ -2081,6 +2094,7 @@ const loadOlderMessages = async () => {
   const messagesArea = messagesAreaRef.value
   const previousScrollHeight = messagesArea?.scrollHeight ?? 0
   const previousScrollTop = messagesArea?.scrollTop ?? 0
+  followingLatestMessages = false
   loadingMore.value = true
   historyLoadError.value = false
   let loadedPage = false
