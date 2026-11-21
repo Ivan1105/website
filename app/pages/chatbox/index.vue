@@ -51,17 +51,6 @@
                     aria-label="主动提醒功能" @click.stop @update:model-value="updateProactiveReminder" />
                 </template>
               </v-list-item>
-              <v-list-item class="chat-setting-item settings-toggle-item" prepend-icon="mdi-book-open-page-variant-outline">
-                <v-list-item-title>自动记录日记</v-list-item-title>
-                <v-list-item-subtitle class="chat-setting-description">
-                  开启后，{{ currentConversation.display_name }}会每天写下与你共度的时光。
-                </v-list-item-subtitle>
-                <template #append>
-                  <v-switch :model-value="currentConversation?.journal_enabled ?? false" color="secondary"
-                    density="compact" hide-details :loading="journalUpdating" :disabled="journalUpdating"
-                    aria-label="自动记录日记" @click.stop @update:model-value="updateJournal" />
-                </template>
-              </v-list-item>
               <v-list-item class="chat-setting-item" prepend-icon="mdi-account-edit-outline"
                 @click="openAiProfileDialog">
                 <v-list-item-title>个人资料</v-list-item-title>
@@ -969,7 +958,6 @@ const aiProfileSaveError = ref('')
 const aiProfileSuccess = ref(false)
 const aiProfileForm = reactive<AiProfileForm>({ nickname: '', cityname: '', timezone: '', birthday: '' })
 const proactiveUpdating = ref(false)
-const journalUpdating = ref(false)
 const drawerOpen = ref(false)
 const snackbar = reactive({ show: false, text: '', timeout: 6000 })
 const showError = (text: string) => {
@@ -2237,23 +2225,6 @@ const updateProactiveReminder = async (value: boolean | null) => {
     if (!handleUnauthorized(error)) showError('主动提醒设置失败，请稍后重试。')
   } finally {
     proactiveUpdating.value = false
-  }
-}
-
-const updateJournal = async (value: boolean | null) => {
-  const conversation = currentConversation.value
-  if (!conversation || journalUpdating.value) return
-  const enabled = Boolean(value)
-  if (enabled === conversation.journal_enabled) return
-
-  journalUpdating.value = true
-  try {
-    await chatApi.updateJournal({ agentId: conversation.name, enabled })
-    conversation.journal_enabled = enabled
-  } catch (error) {
-    if (!handleUnauthorized(error)) showError('自动记录日志设置失败，请稍后重试。')
-  } finally {
-    journalUpdating.value = false
   }
 }
 

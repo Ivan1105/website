@@ -89,15 +89,15 @@ test('系统通知跨标签页同步及提示，不增加会话未读；重复�
   } finally { h.service.stop() }
 })
 
-test('三种静默来源继续广播供会话刷新，单标签页和跨标签页都不弹提示', async () => {
+test('两种静默来源继续广播供会话刷新，单标签页和跨标签页都不弹提示', async () => {
   const h = notificationHarness()
   try {
-    for (const [index, source] of (['chat', 'reminder', 'journal'] as const).entries()) {
+    for (const [index, source] of (['chat', 'reminder'] as const).entries()) {
       const notification = chat(source, String(index + 1))
       await h.handlers.onNotification(notification)
       h.channel.listener({ data: { type: 'snackbar', tabId: h.channel.messages[0]!.presence!.tabId, notification } })
     }
-    assert.equal(h.published.length, 3); assert.equal(h.store.unreadByThread.thread, 3); assert.equal(h.snackbars.length, 0)
+    assert.equal(h.published.length, 2); assert.equal(h.store.unreadByThread.thread, 2); assert.equal(h.snackbars.length, 0)
     await h.handlers.onNotification(chat('mail', '4'))
     assert.equal(h.snackbars.length, 1)
   } finally { h.service.stop() }

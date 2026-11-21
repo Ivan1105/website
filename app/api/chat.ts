@@ -7,7 +7,6 @@ export interface ConversationDTO {
   avatar: string
   thread_id?: string
   proactive_enabled: boolean
-  journal_enabled: boolean
 }
 
 export interface MessageDTO {
@@ -64,11 +63,6 @@ export interface SendMessageDTO {
 }
 
 export interface UpdateProactiveReq {
-  agentId: string
-  enabled: boolean
-}
-
-export interface UpdateJournalReq {
   agentId: string
   enabled: boolean
 }
@@ -178,14 +172,6 @@ export const useChatApi = () => {
 
     async updateProactive(req: UpdateProactiveReq): Promise<void> {
       const resp = await $api<unknown>('/chatbox/proactive', {
-        method: 'POST',
-        body: req,
-      })
-      unwrap(resp)
-    },
-
-    async updateJournal(req: UpdateJournalReq): Promise<void> {
-      const resp = await $api<unknown>('/chatbox/journal', {
         method: 'POST',
         body: req,
       })

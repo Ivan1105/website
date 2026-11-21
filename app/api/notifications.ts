@@ -1,6 +1,6 @@
 import { ApiError, getToken, unwrap, useHttp, type Envelope } from './http'
 
-export type NotificationSource = 'chat' | 'reminder' | 'proactive' | 'journal' | 'mail' | 'activity' | 'system'
+export type NotificationSource = 'chat' | 'reminder' | 'proactive' | 'mail' | 'activity' | 'system'
 
 interface NotificationBase {
   id: string
@@ -108,7 +108,7 @@ const parseNotification = (payload: unknown): NotificationData => {
   if (event.type !== 'chat.message.ready') {
     throw new NotificationStreamError('通知字段 type 格式错误', 200, payload)
   }
-  if (source !== 'chat' && source !== 'reminder' && source !== 'proactive' && source !== 'journal' && source !== 'mail' && source !== 'activity') {
+  if (source !== 'chat' && source !== 'reminder' && source !== 'proactive' && source !== 'mail' && source !== 'activity') {
     throw new NotificationStreamError('通知字段 source 格式错误', 200, payload)
   }
   if (!Number.isSafeInteger(event.agent_id) || (event.agent_id as number) < 0) {

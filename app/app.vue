@@ -99,7 +99,6 @@ const notificationTitles = {
   chat: '聊天回复',
   reminder: '提醒消息',
   proactive: '主动消息',
-  journal: '日记已完成',
   mail: '新邮件',
   activity: '官方公告',
   system: '系统通知',

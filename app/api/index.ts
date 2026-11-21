@@ -82,7 +82,6 @@ export type {
   QueryMessagesDTO,
   SendMessageDTO,
   SendMessageReq,
-  UpdateJournalReq,
   UpdateProactiveReq,
 } from './chat'
 
