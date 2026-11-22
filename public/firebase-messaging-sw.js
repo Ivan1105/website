@@ -14,15 +14,16 @@ self.addEventListener('notificationclick', (event) => {
 
   const data = event.notification.data
   const system = isSystemNotification(data)
-  const target = new URL(system ? '/admin/activities' : '/chatbox', self.location.origin)
+  const qq = data?.eventType === 'qq.message.ready'
+  const target = new URL(system ? '/admin/activities' : qq ? '/' : '/chatbox', self.location.origin)
   if (system) {
     target.searchParams.set('section', data.section)
     target.searchParams.set('id', data.targetId)
   }
-  if (!system && data && typeof data.threadId === 'string' && data.threadId) {
+  if (!system && !qq && data && typeof data.threadId === 'string' && data.threadId) {
     target.searchParams.set('thread', data.threadId)
   }
-  if (!system && data && typeof data.agentId === 'string' && data.agentId) {
+  if (!system && !qq && data && typeof data.agentId === 'string' && data.agentId) {
     target.searchParams.set('agent', data.agentId)
   }
 
@@ -30,7 +31,7 @@ self.addEventListener('notificationclick', (event) => {
     const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true })
     const existing = windows.find(client => new URL(client.url).origin === self.location.origin)
     if (existing) {
-      await existing.navigate(target.toString())
+      if (!qq) await existing.navigate(target.toString())
       await existing.focus()
       return
     }
@@ -63,6 +64,14 @@ if (hasConfig) {
     if (isSystemNotification(data)) {
       return self.registration.showNotification(data.notificationTitle, {
         body: data.notificationBody, icon: '/favicon.ico', tag: `miku-system:${data.eventId}`, data,
+      })
+    }
+    if (data?.eventType === 'qq.message.ready' && validSources.has(data.source) && /^\d+$/.test(data.eventId || '')) {
+      return self.registration.showNotification('Miku', {
+        body: 'QQ 会话有新消息',
+        icon: '/favicon.ico',
+        tag: `miku-message:${data.eventId}`,
+        data: { eventType: 'qq.message.ready', eventId: data.eventId },
       })
     }
     if (!data

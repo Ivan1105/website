@@ -23,6 +23,13 @@ export type NotificationData = NotificationBase & ({
   run_id: string
   message_id: string | null
 } | {
+  type: 'qq.message.ready'
+  source: Exclude<NotificationSource, 'system'>
+  agent_id: null
+  thread_id: null
+  run_id: null
+  message_id: null
+} | {
   type: 'system.notification'
   source: 'system'
   agent_id: null
@@ -105,11 +112,20 @@ const parseNotification = (payload: unknown): NotificationData => {
     return { id, type: 'system.notification', source, agent_id: null, thread_id: null, run_id: null, message_id: null,
       preview: typeof event.preview === 'string' ? event.preview : '', created_at: createdAt, payload: parseSystemPayload(event.payload) }
   }
-  if (event.type !== 'chat.message.ready') {
+  if (event.type !== 'chat.message.ready' && event.type !== 'qq.message.ready') {
     throw new NotificationStreamError('通知字段 type 格式错误', 200, payload)
   }
   if (source !== 'chat' && source !== 'reminder' && source !== 'proactive' && source !== 'mail' && source !== 'activity') {
     throw new NotificationStreamError('通知字段 source 格式错误', 200, payload)
+  }
+  if (event.type === 'qq.message.ready') {
+    if (event.agent_id !== null || event.thread_id !== null || event.run_id !== null || event.message_id !== null) {
+      throw new NotificationStreamError('QQ 通知关联字段格式错误', 200, payload)
+    }
+    const createdAt = requireString(event.created_at, 'created_at', payload)
+    if (Number.isNaN(Date.parse(createdAt))) throw new NotificationStreamError('通知字段 created_at 格式错误', 200, payload)
+    return { id, type: 'qq.message.ready', source, agent_id: null, thread_id: null, run_id: null, message_id: null,
+      preview: 'QQ 会话有新消息', created_at: createdAt }
   }
   if (!Number.isSafeInteger(event.agent_id) || (event.agent_id as number) < 0) {
     throw new NotificationStreamError('通知字段 agent_id 格式错误', 200, payload)

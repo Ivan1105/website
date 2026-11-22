@@ -25,8 +25,8 @@ const LEASE_DURATION = 15_000
 const PRESENCE_MAX_AGE = 15_000
 const MAX_RECONNECT_DELAY = 30_000
 
-const shouldShowSnackbar = (source: NotificationData['source']) => (
-  source !== 'chat' && source !== 'reminder'
+const shouldShowSnackbar = (notification: NotificationData) => (
+  notification.type === 'qq.message.ready' || (notification.source !== 'chat' && notification.source !== 'reminder')
 )
 
 const parseLease = (raw: string | null): { owner: string, expiresAt: number } | null => {
@@ -197,7 +197,7 @@ export const useNotificationService = () => {
         post({ type: 'unread', unread: store.unreadByThread })
       }
       publishNotification(notification)
-      if (!targetVisible && shouldShowSnackbar(notification.source)) {
+      if (!targetVisible && shouldShowSnackbar(notification)) {
         const visibleTab = presences.find(presence => presence.visible)
         if (visibleTab) {
           if (visibleTab.tabId === tabId) store.enqueueSnackbar(notification)
@@ -338,7 +338,7 @@ export const useNotificationService = () => {
     else if (message.type === 'catchup-complete') store.markCatchupComplete()
     else if (message.type === 'unread') updateUnread(message.unread, false)
     else if (message.type === 'read') store.clearUnread(message.threadId)
-    else if (message.type === 'snackbar' && message.tabId === tabId && shouldShowSnackbar(message.notification.source)) {
+    else if (message.type === 'snackbar' && message.tabId === tabId && shouldShowSnackbar(message.notification)) {
       store.enqueueSnackbar(message.notification)
     }
     else if (message.type === 'desktop-setting') {
