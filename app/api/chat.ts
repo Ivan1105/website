@@ -9,6 +9,25 @@ export interface ConversationDTO {
   proactive_enabled: boolean
 }
 
+export interface EmotionValuesDTO {
+  valence: number
+  energy: number
+  affection: number
+  curiosity: number
+  excitement: number
+}
+
+export type EmotionCategoryDTO = 'shared_joy' | 'user_distress' | 'warm_interaction'
+  | 'music_engagement' | 'novel_topic' | 'criticism' | 'hostility'
+
+export type EmotionOverviewDTO = { status: 'paused' } | {
+  status: 'active'
+  current: EmotionValuesDTO
+  asOf: string
+  source: 'baseline' | 'saved'
+  timeline: { appliedAt: string; categories: EmotionCategoryDTO[]; delta: EmotionValuesDTO }[]
+}
+
 export interface MessageDTO {
   id: string
   role: 'user' | 'assistant' | 'signal'
@@ -134,6 +153,10 @@ export const useChatApi = () => {
   const { $api } = useHttp()
 
   const chatApi = {
+    async getEmotionOverview(signal?: AbortSignal): Promise<EmotionOverviewDTO> {
+      const response = await $api<Envelope<EmotionOverviewDTO>>('/chatbox/emotion', { signal })
+      return unwrap(response)
+    },
     async getConversations(): Promise<ConversationDTO[]> {
       const resp = await $api<ConversationDTO[] | Envelope<ConversationDTO[]>>('/chatbox/queryConversations', {
         method: 'GET',

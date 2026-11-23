@@ -33,6 +33,14 @@
             <h2>{{ currentConversation?.display_name || '聊天空间' }}</h2>
             <p>{{ currentConversation ? '把你的想法，写在这里。' : '选择一个会话，开始交流。' }}</p>
           </div>
+          <v-tooltip v-if="currentConversation?.name === 'mikuAgent' && appStore.isLoggedIn && !authRequired"
+            text="情绪状态" location="bottom">
+            <template #activator="{ props }">
+              <v-btn v-bind="props" icon="mdi-emoticon-outline" variant="text" color="secondary" size="small"
+                class="chat-settings-trigger" aria-label="情绪状态"
+                :to="{ path: '/chatbox/emotion', query: { agent: String(currentConversation.id), thread: currentConversation.thread_id } }" />
+            </template>
+          </v-tooltip>
           <v-menu v-if="currentConversation && !authRequired" v-model="settingsMenuOpen" location="bottom end"
             :close-on-content-click="false" offset="8">
             <template #activator="{ props }">
