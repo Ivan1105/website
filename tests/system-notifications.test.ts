@@ -26,9 +26,13 @@ const system = (id = '1'): Extract<NotificationData, { type: 'system.notificatio
 })
 const chat = (source: Exclude<NotificationSource, 'system'>, id: string): Extract<NotificationData, { type: 'chat.message.ready' }> => ({ id, type: 'chat.message.ready', source, agent_id: 1, thread_id: 'thread',
   run_id: 'run', message_id: null, preview: '消息', created_at: '2026-11-16T04:00:00Z' })
+const qq = (id = '1'): Extract<NotificationData, { type: 'qq.message.ready' }> => ({
+  id, type: 'qq.message.ready', source: 'proactive', agent_id: null, thread_id: null, run_id: null, message_id: null,
+  preview: 'QQ 会话有新消息', created_at: '2026-11-16T04:00:00Z',
+})
 
 function notificationHarness(catchupComplete = true) {
-  interface ChannelMessage { type: string, tabId?: string, presence?: { tabId: string, visible: boolean, activeThreadId: string | null, updatedAt: number }, notification?: NotificationData }
+  interface ChannelMessage { type: string, id?: string, tabId?: string, presence?: { tabId: string, visible: boolean, activeThreadId: string | null, updatedAt: number }, notification?: NotificationData }
   const channels: Channel[] = [], timers: Array<() => void> = [], published: NotificationData[] = [], snackbars: NotificationData[] = []
   let handlers: NotificationStreamHandlers | undefined
   const storage = new Map<string, string>()
@@ -103,6 +107,28 @@ test('两种静默来源继续广播供会话刷新，单标签页和跨标签�
   } finally { h.service.stop() }
 })
 
+test('QQ 会话事件在本地和跨标签页都不弹提示，SSE 游标继续推进', async () => {
+  const h = notificationHarness()
+  try {
+    await h.handlers.onNotification(qq())
+    h.channel.listener({ data: { type: 'snackbar', tabId: h.channel.messages[0]!.presence!.tabId, notification: qq() } })
+    assert.equal(h.snackbars.length, 0)
+
+    h.document.visibilityState = 'hidden'
+    h.channel.listener({ data: { type: 'presence', presence: {
+      tabId: 'peer', visible: true, activeThreadId: null, updatedAt: Date.now(),
+    } } })
+    await h.handlers.onNotification(qq('2'))
+    assert.ok(!h.channel.messages.some(message => message.type === 'snackbar'))
+    assert.equal(h.store.lastEventId, '2')
+    assert.ok(h.channel.messages.some(message => message.type === 'cursor' && message.id === '2'))
+    assert.deepEqual(h.store.unreadByThread, {})
+
+    await h.handlers.onNotification(chat('mail', '3'))
+    assert.ok(h.channel.messages.some(message => message.type === 'snackbar' && message.tabId === 'peer' && message.notification?.id === '3'))
+  } finally { h.service.stop() }
+})
+
 test('主标签页将系统提示路由到可见标签页；首次补发只推进游标', async () => {
   const h = notificationHarness(false)
   try {
@@ -121,23 +147,27 @@ test('主标签页将系统提示路由到可见标签页；首次补发只推�
   } finally { h.service.stop() }
 })
 
-test('SSE解析支持无会话系统通知并拒绝无效管理目标', async () => {
+test('SSE 解析系统通知和 QQ 会话事件，并拒绝无效管理目标', async () => {
   class ApiError extends Error { status: number; constructor(message: string, status: number) { super(message); this.status = status } }
   let payload: unknown = system()
   const exports = loadTs<Pick<typeof import('../app/api/notifications'), 'useNotificationApi'>>('../app/api/notifications.ts', {
     useRuntimeConfig: () => ({ public: { apiUrl: 'https://api.test' } }), TextDecoder,
     fetch: async () => new Response(`id: 1\nevent: notification\ndata: ${JSON.stringify(payload)}\n\nevent: ping\ndata: {"last_event_id":"1"}\n\n`),
   }, { './http': { ApiError, getToken: () => 'test', useHttp: () => ({ $api() {} }) } })
-  const controller = new AbortController(), notifications: NotificationData[] = []
-  await exports.useNotificationApi().streamNotifications('', {
-    onNotification: async value => { notifications.push(value) }, onPing: () => controller.abort(),
-  }, controller.signal)
-  assert.equal(notifications[0]!.type, 'system.notification'); assert.equal(notifications[0]!.thread_id, null)
+  for (const notification of [system(), qq()]) {
+    payload = notification
+    const controller = new AbortController(), notifications: NotificationData[] = []
+    await exports.useNotificationApi().streamNotifications('', {
+      onNotification: async value => { notifications.push(value) }, onPing: () => controller.abort(),
+    }, controller.signal)
+    assert.equal(notifications[0]!.type, notification.type)
+    assert.equal(notifications[0]!.thread_id, null)
+  }
   payload = { ...system(), payload: { ...system().payload, target: { section: 'events', id: 12 } } }
   await assert.rejects(exports.useNotificationApi().streamNotifications('', { onNotification: async () => assert.fail('invalid target') }, new AbortController().signal), /目标格式错误/)
 })
 
-test('后台FCM系统通知显示模板预览，点击只打开同站管理详情，聊天跳转保持原样', async () => {
+test('后台 FCM 仅显示系统和网页聊天通知，保留旧 QQ 通知的点击行为', async () => {
   type PushData = Record<string, string>
   const listeners: Record<string, (event: { notification: { close(): void, data: PushData }, waitUntil(promise: Promise<unknown>): void }) => void> = {}
   const shown: Array<{ title: string, body: string, data: PushData }> = [], navigated: string[] = []
@@ -158,8 +188,18 @@ test('后台FCM系统通知显示模板预览，点击只打开同站管理详�
   await pending
   assert.equal(navigated[0], 'https://site.test/admin/activities?section=runs&id=12')
   await background({ data: { ...data, section: 'https://evil.test' } })
+  const qqData = { eventType: 'qq.message.ready', source: 'proactive', eventId: '2', notificationTitle: 'Miku', notificationBody: 'QQ 会话有新消息' }
+  await background({ data: qqData })
   assert.equal(shown.length, 1)
-  listeners.notificationclick!({ notification: { close() {}, data: { threadId: 'thread', agentId: '1' } }, waitUntil: promise => { pending = promise } })
+
+  await background({ data: { eventType: 'chat.message.ready', source: 'mail', eventId: '3', notificationTitle: 'Miku', notificationBody: '你有一条新消息',
+    agentId: '1', threadId: 'thread', runId: 'run', messageId: 'message' } })
+  assert.equal(shown.length, 2)
+  listeners.notificationclick!({ notification: { close() {}, data: shown[1]!.data }, waitUntil: promise => { pending = promise } })
   await pending
   assert.equal(navigated[1], 'https://site.test/chatbox?thread=thread&agent=1')
+
+  listeners.notificationclick!({ notification: { close() {}, data: qqData }, waitUntil: promise => { pending = promise } })
+  await pending
+  assert.equal(navigated[2], 'https://site.test/')
 })

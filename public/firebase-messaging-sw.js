@@ -66,14 +66,6 @@ if (hasConfig) {
         body: data.notificationBody, icon: '/favicon.ico', tag: `miku-system:${data.eventId}`, data,
       })
     }
-    if (data?.eventType === 'qq.message.ready' && validSources.has(data.source) && /^\d+$/.test(data.eventId || '')) {
-      return self.registration.showNotification('Miku', {
-        body: 'QQ 会话有新消息',
-        icon: '/favicon.ico',
-        tag: `miku-message:${data.eventId}`,
-        data: { eventType: 'qq.message.ready', eventId: data.eventId },
-      })
-    }
     if (!data
       || data.eventType !== 'chat.message.ready'
       || data.notificationTitle !== 'Miku'

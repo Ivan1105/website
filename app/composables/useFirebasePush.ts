@@ -62,10 +62,6 @@ const parsePushSignal = (payload: MessagePayload): PushRefreshSignal | null => {
       return { eventId, agentId: null, threadId: null, system }
     } catch { return null }
   }
-  if (data?.eventType === 'qq.message.ready' && VALID_SOURCES.has(data.source ?? '')
-    && typeof eventId === 'string' && /^\d+$/.test(eventId)) {
-    return { eventId, agentId: null, threadId: null }
-  }
   if (!data
     || data.eventType !== 'chat.message.ready'
     || data.notificationTitle !== 'Miku'

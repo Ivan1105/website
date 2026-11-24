@@ -26,7 +26,7 @@ const PRESENCE_MAX_AGE = 15_000
 const MAX_RECONNECT_DELAY = 30_000
 
 const shouldShowSnackbar = (notification: NotificationData) => (
-  notification.type === 'qq.message.ready' || (notification.source !== 'chat' && notification.source !== 'reminder')
+  notification.type !== 'qq.message.ready' && notification.source !== 'chat' && notification.source !== 'reminder'
 )
 
 const parseLease = (raw: string | null): { owner: string, expiresAt: number } | null => {

@@ -57,7 +57,7 @@
         <span>{{ notificationStore.activeSnackbarNotification?.preview || '有一条新消息' }}</span>
       </div>
       <template #actions>
-        <v-btn v-if="notificationStore.activeSnackbarNotification?.type !== 'qq.message.ready'" variant="text" @click="openNotification">查看</v-btn>
+        <v-btn variant="text" @click="openNotification">查看</v-btn>
         <v-btn icon="mdi-close" variant="text" aria-label="关闭提醒" @click="notificationStore.dismissSnackbar()" />
       </template>
     </v-snackbar>
@@ -106,7 +106,6 @@ const notificationTitles = {
 const notificationTitle = computed(() => {
   const notification = notificationStore.activeSnackbarNotification
   if (notification?.type === 'system.notification') return notification.payload.title
-  if (notification?.type === 'qq.message.ready') return 'QQ 消息'
   const source = notification?.source
   return source ? notificationTitles[source] : '新消息'
 })
