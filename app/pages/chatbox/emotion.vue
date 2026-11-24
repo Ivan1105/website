@@ -39,14 +39,26 @@
           </div>
           <p class="muted">计算于 <time :datetime="overview.asOf">{{ formatTime(overview.asOf) }}</time></p>
         </div>
-        <div class="dimension-grid">
-          <div v-for="dimension in dimensions" :key="dimension.key" class="dimension">
-            <span class="dimension-label">{{ dimension.label }}</span>
-            <strong>{{ formatValue(overview.current[dimension.key]) }}</strong>
-            <meter :aria-label="dimension.label" :min="dimension.min" :max="1" :value="overview.current[dimension.key]" />
-            <div class="dimension-range" aria-hidden="true"><span>{{ dimension.min === -1 ? '−1' : '0' }}</span><span>1</span></div>
-          </div>
-        </div>
+        <figure v-if="radar" class="emotion-radar">
+          <svg viewBox="0 0 360 290" role="img" :aria-label="radar.label" aria-describedby="emotion-radar-scale">
+            <g class="radar-grid">
+              <polygon v-for="ring in radarRings" :key="ring" :points="ring" />
+              <line v-for="axis in radarAxes" :key="axis.key"
+                :x1="radarCenter.x" :y1="radarCenter.y" :x2="axis.end.x" :y2="axis.end.y" />
+            </g>
+            <polygon class="radar-shape" :points="radar.points" />
+            <circle v-for="axis in radar.axes" :key="axis.key" class="radar-point"
+              :cx="axis.point.x" :cy="axis.point.y" r="4" />
+            <text v-for="axis in radar.axes" :key="axis.key" class="radar-label"
+              :x="axis.labelPosition.x" :y="axis.labelPosition.y" :text-anchor="axis.anchor">
+              {{ axis.label }}
+              <tspan class="radar-value" :x="axis.labelPosition.x" dy="20">{{ axis.value }}</tspan>
+            </text>
+          </svg>
+          <figcaption id="emotion-radar-scale" class="muted">
+            愉悦度范围为 −1 至 1，其余维度为 0 至 1。越靠外，数值越高。
+          </figcaption>
+        </figure>
       </section>
 
       <section class="surface-card emotion-panel" aria-labelledby="emotion-history">
@@ -122,6 +134,50 @@ const formatDelta = (value: number) => {
 }
 
 const overview = ref<EmotionOverviewDTO>()
+const radarCenter = { x: 180, y: 148 }
+const radarRadius = 94
+
+function radarPoint(angle: number, radius: number) {
+  return {
+    x: radarCenter.x + Math.cos(angle) * radius,
+    y: radarCenter.y + Math.sin(angle) * radius,
+  }
+}
+
+const radarAxes = dimensions.map((dimension, index) => {
+  const angle = (2 * Math.PI * index) / dimensions.length - Math.PI / 2
+  const labelPosition = radarPoint(angle, radarRadius + 12)
+  return {
+    ...dimension,
+    angle,
+    end: radarPoint(angle, radarRadius),
+    labelPosition: { x: labelPosition.x, y: labelPosition.y - 6 },
+    anchor: index === 0 ? 'middle' : index <= 2 ? 'start' : 'end',
+  } as const
+})
+
+const radarRings = [0.25, 0.5, 0.75, 1].map(scale => radarAxes.map(axis => {
+  const { x, y } = radarPoint(axis.angle, radarRadius * scale)
+  return `${x},${y}`
+}).join(' '))
+
+const radar = computed(() => {
+  const state = overview.value
+  if (state?.status !== 'active') return
+
+  const axes = radarAxes.map(axis => {
+    const value = state.current[axis.key]
+    const scale = (value - axis.min) / (1 - axis.min)
+    return { ...axis, value: formatValue(value), point: radarPoint(axis.angle, radarRadius * scale) }
+  })
+
+  return {
+    axes,
+    points: axes.map(({ point }) => `${point.x},${point.y}`).join(' '),
+    label: `五维情绪雷达图。${axes.map(axis => `${axis.label} ${axis.value}`).join('，')}`,
+  }
+})
+
 const loading = ref(false)
 const failed = ref(false)
 let activeRequest: AbortController | undefined
@@ -162,15 +218,14 @@ onBeforeUnmount(() => activeRequest?.abort())
 .section-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: baseline; margin-bottom: 16px; }
 .section-heading h2, .emotion-state h2 { font-size: 1.15rem; }
 .section-heading p { font-size: .88rem; }
-.dimension-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 135px), 1fr)); gap: 10px; }
-.dimension { display: grid; gap: 4px; padding: 14px; border-radius: 16px; background: rgb(var(--v-theme-surface-variant)); }
-.dimension-label { font-size: .88rem; }
-.dimension strong { font-size: 1.65rem; line-height: 1.25; font-variant-numeric: tabular-nums; }
-.dimension meter { width: 100%; height: 8px; appearance: none; accent-color: rgb(var(--v-theme-secondary)); }
-.dimension meter::-webkit-meter-bar { background: rgb(var(--v-theme-surface)); border: 0; border-radius: 8px; }
-.dimension meter::-webkit-meter-optimum-value { background: rgb(var(--v-theme-secondary)); border-radius: 8px; }
-.dimension meter::-moz-meter-bar { background: rgb(var(--v-theme-secondary)); border-radius: 8px; }
-.dimension-range { display: flex; justify-content: space-between; color: var(--site-muted); font-size: .75rem; }
+.emotion-radar { width: min(100%, 420px); margin-inline: auto; }
+.emotion-radar svg { display: block; width: 100%; height: auto; }
+.emotion-radar figcaption { font-size: .82rem; text-align: center; }
+.radar-grid { fill: none; stroke: rgb(var(--v-theme-on-surface)); stroke-opacity: .2; }
+.radar-shape { fill: rgb(57 197 187 / .24); stroke: #39c5bb; stroke-width: 2.5; stroke-linejoin: round; }
+.radar-point { fill: #39c5bb; stroke: rgb(var(--v-theme-surface)); stroke-width: 1.5; }
+.radar-label { fill: rgb(var(--v-theme-on-surface)); font-size: 13px; }
+.radar-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .emotion-timeline, .event-deltas { list-style: none; padding: 0; }
 .timeline-entry { display: grid; grid-template-columns: minmax(130px, 1fr) 4fr; gap: 6px 16px; border-top: 1px solid var(--site-border); padding: 14px 0; }
 .timeline-entry:last-child { padding-bottom: 0; }
