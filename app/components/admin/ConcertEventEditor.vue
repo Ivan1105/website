@@ -56,7 +56,7 @@
             <div class="section-actions">
               <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-music-note-plus" :disabled="relationsLoading" @click="addSetlistItem">添加歌曲</v-btn>
               <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-content-copy" :disabled="setlistActionsDisabled" @click="copySetlistJson">复制 JSON</v-btn>
-              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-content-paste" :disabled="setlistActionsDisabled" @click="pasteSetlistJson">粘贴 JSON</v-btn>
+              <v-btn variant="text" color="secondary" size="small" prepend-icon="mdi-content-paste" :disabled="setlistActionsDisabled" :loading="pasting" @click="pasteSetlistJson">粘贴 JSON</v-btn>
               <v-btn variant="text" color="secondary" size="small" @click="$emit('switch-resource', 'songs')">维护歌曲库</v-btn>
             </div>
           </div>
@@ -100,7 +100,7 @@
       <footer class="editor-actions">
         <v-btn variant="text" :disabled="saving" @click="$emit('cancel')">关闭</v-btn>
         <v-btn
-          type="submit" color="primary" :loading="saving" :disabled="relationsLoading || relationsLoadFailed"
+          type="submit" color="primary" :loading="saving" :disabled="relationsLoading || relationsLoadFailed || pasting"
           prepend-icon="mdi-content-save-outline"
         >
           {{ currentEvent ? '保存全部' : '保存并继续编辑' }}
@@ -167,6 +167,7 @@ const optionLoading = reactive({ tours: false, venues: false, songs: false })
 const relationsLoading = ref(false)
 const relationsLoadFailed = ref(false)
 const saving = ref(false)
+const pasting = ref(false)
 const error = ref<string | null>(null)
 const success = ref<string | null>(null)
 const baseline = ref('')
@@ -186,7 +187,7 @@ const requiredRules = [(value: string) => !!value?.trim() || '此项为必填']
 const slugRules = [...requiredRules, (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) || '只能包含小写字母、数字和连字符']
 const copyingMode = computed(() => props.copySource !== null && props.record === null)
 const canEditRelations = computed(() => currentEvent.value !== null || copyingMode.value)
-const setlistActionsDisabled = computed(() => relationsLoading.value || relationsLoadFailed.value || saving.value)
+const setlistActionsDisabled = computed(() => relationsLoading.value || relationsLoadFailed.value || saving.value || pasting.value)
 const editorTitle = computed(() => currentEvent.value ? '编辑演出场次' : copyingMode.value ? '复制演出场次' : '新增演出场次')
 
 const timeState = computed(() => {
@@ -205,17 +206,22 @@ const timePreview = computed(() => timeState.value.start
 
 watch(() => [props.record, props.copySource] as const, reset, { immediate: true })
 watch([form, setlist], () => emit('dirty-change', snapshot() !== baseline.value), { deep: true })
-onBeforeUnmount(() => songSearchTimer.stop())
+onBeforeUnmount(() => {
+  resetVersion++
+  songSearchTimer.stop()
+})
 
 async function reset() {
   const version = ++resetVersion
+  const relationSource = props.record ?? props.copySource
   songSearchTimer.stop()
   pendingSongSearch.value = undefined
   currentEvent.value = props.record
   Object.assign(form, emptyForm())
   setlist.value = []
-  relationsLoading.value = false
+  relationsLoading.value = relationSource !== null
   relationsLoadFailed.value = false
+  pasting.value = false
   error.value = null
   success.value = null
   if (props.record) fillForm(props.record)
@@ -225,7 +231,6 @@ async function reset() {
   }
   await Promise.all([loadTours(), loadVenues(), loadSongs()])
   if (version !== resetVersion) return
-  const relationSource = props.record ?? props.copySource
   if (relationSource) await loadRelations(relationSource.id, version)
   if (version !== resetVersion) return
   if (!copyingMode.value) markClean(version)
@@ -251,7 +256,6 @@ function fillCopyForm(record: EventDTO) {
 }
 
 async function loadRelations(id: number, version: number) {
-  relationsLoading.value = true
   try {
     const setlistData = await concertAdminApi.getSetlist(id)
     if (version !== resetVersion) return
@@ -271,7 +275,7 @@ async function loadRelations(id: number, version: number) {
 }
 
 async function save() {
-  if (saving.value || relationsLoading.value || relationsLoadFailed.value) return
+  if (setlistActionsDisabled.value) return
   error.value = null
   success.value = null
   if (!form.official_name.trim() || !form.slug.trim() || !form.timezone.trim()) { error.value = '请填写所有必填项。'; return }
@@ -335,18 +339,38 @@ async function copySetlistJson() {
 }
 
 async function pasteSetlistJson() {
+  if (setlistActionsDisabled.value) return
+  const version = resetVersion
+  pasting.value = true
+  error.value = null
+  success.value = null
   try {
     if (!navigator.clipboard?.readText) throw new Error('当前浏览器不支持从剪贴板读取。')
     const text = await navigator.clipboard.readText()
+    if (version !== resetVersion) return
     if (!text.trim()) throw new Error('剪贴板中没有可粘贴的内容。')
     const imported = parseSetlistJson(text)
+    const knownIds = new Set(songOptions.value.map(song => song.id))
+    const missingIds = [...new Set(imported.map(item => item.song_id))].filter(id => !knownIds.has(id))
+    const songs = await Promise.all(missingIds.map(async (id) => {
+      try {
+        return await concertAdminApi.getSong(id)
+      } catch (caught) {
+        if (isApiError(caught) && caught.status === 404) throw new Error(`歌曲库中不存在歌曲 ID ${id}。`)
+        throw new Error(`暂时无法查询歌曲 ID ${id}，请重试。`)
+      }
+    }))
+    if (version !== resetVersion) return
+    if (songs.length) mergeOptions(songOptions, songs)
     setlist.value = imported.map(item => ({
       key: crypto.randomUUID(), song_id: item.song_id, version_label: item.version_label ?? '',
       is_encore: item.is_encore, is_medley: item.is_medley, is_tape_song: item.is_tape_song ?? false, confidence: item.confidence, notes: item.notes ?? '',
     }))
     success.value = `已导入 ${imported.length} 首歌曲，保存后生效。`
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : '读取或解析歌单 JSON 失败。'
+    if (version === resetVersion) error.value = caught instanceof Error ? caught.message : '读取或解析歌单 JSON 失败。'
+  } finally {
+    if (version === resetVersion) pasting.value = false
   }
 }
 
@@ -356,13 +380,11 @@ function parseSetlistJson(text: string): SetlistJsonItem[] {
   if (!isRecord(value) || value.format_version !== 1 || !Array.isArray(value.items)) throw new Error('歌单 JSON 格式无效，需要 format_version: 1 和 items 数组。')
   const result: SetlistJsonItem[] = []
   value.items.forEach((raw, index) => {
-    if (!isRecord(raw) || !Number.isInteger(raw.song_id) || typeof raw.is_encore !== 'boolean' || typeof raw.is_medley !== 'boolean' || (raw.is_tape_song !== undefined && typeof raw.is_tape_song !== 'boolean') || typeof raw.confidence !== 'string') throw new Error(`第 ${index + 1} 首歌曲的字段格式无效。`)
+    if (!isRecord(raw) || typeof raw.song_id !== 'number' || !Number.isSafeInteger(raw.song_id) || raw.song_id <= 0 || typeof raw.is_encore !== 'boolean' || typeof raw.is_medley !== 'boolean' || (raw.is_tape_song !== undefined && typeof raw.is_tape_song !== 'boolean') || typeof raw.confidence !== 'string') throw new Error(`第 ${index + 1} 首歌曲的字段格式无效。`)
     if (!CONFIDENCE_LEVELS.includes(raw.confidence as EventDTO['confidence'])) throw new Error(`第 ${index + 1} 首歌曲的确认级别无效。`)
-    const song = songOptions.value.find(option => option.id === raw.song_id)
-    if (!song) throw new Error(`找不到歌曲 ID ${raw.song_id}，请先维护歌曲库或重新加载歌单。`)
     if (typeof raw.title !== 'string' || (raw.version_label !== null && typeof raw.version_label !== 'string')) throw new Error(`第 ${index + 1} 首歌曲的文本字段无效。`)
     if (raw.notes !== null && typeof raw.notes !== 'string') throw new Error(`第 ${index + 1} 首歌曲的备注字段无效。`)
-    result.push({ song_id: raw.song_id as number, title: song.title, version_label: raw.version_label as string | null, is_encore: raw.is_encore as boolean, is_medley: raw.is_medley as boolean, is_tape_song: (raw.is_tape_song as boolean | undefined) ?? false, confidence: raw.confidence as EventDTO['confidence'], notes: raw.notes as string | null })
+    result.push({ song_id: raw.song_id, title: raw.title, version_label: raw.version_label, is_encore: raw.is_encore, is_medley: raw.is_medley, is_tape_song: raw.is_tape_song ?? false, confidence: raw.confidence as EventDTO['confidence'], notes: raw.notes })
   })
   return result
 }
