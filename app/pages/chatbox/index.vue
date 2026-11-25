@@ -38,7 +38,7 @@
             <template #activator="{ props }">
               <v-btn v-bind="props" icon="mdi-emoticon-outline" variant="text" color="secondary" size="small"
                 class="chat-settings-trigger" aria-label="情绪状态"
-                :to="{ path: '/chatbox/emotion', query: { agent: String(currentConversation.id), thread: currentConversation.thread_id } }" />
+                @click="openChatSettingsPage('emotion')" />
             </template>
           </v-tooltip>
           <v-menu v-if="currentConversation && !authRequired" v-model="settingsMenuOpen" location="bottom end"
@@ -60,14 +60,14 @@
                 </template>
               </v-list-item>
               <v-list-item class="chat-setting-item" prepend-icon="mdi-account-edit-outline"
-                @click="openAiProfileDialog">
+                @click="openChatSettingsPage('profile')">
                 <v-list-item-title>个人资料</v-list-item-title>
                 <v-list-item-subtitle class="chat-setting-description">
                   告诉 Miku 如何称呼你，以及你的城市、时区和生日。
                 </v-list-item-subtitle>
               </v-list-item>
               <v-list-item class="chat-setting-item" prepend-icon="mdi-shield-key-outline"
-                @click="openServiceConnectionsDialog">
+                @click="openChatSettingsPage('services')">
                 <v-list-item-title>第三方服务授权</v-list-item-title>
                 <v-list-item-subtitle class="chat-setting-description">
                   连接邮箱或授权第三方应用后，可在对话中使用对应的服务能力。
@@ -205,14 +205,28 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-    <v-dialog v-model="aiProfileDialogOpen" persistent fullscreen transition="dialog-bottom-transition">
+    <v-dialog :model-value="route.query.settings === 'emotion'" :close-on-back="false" persistent fullscreen
+      transition="dialog-bottom-transition" aria-labelledby="chat-emotion-title">
+      <v-card class="email-config-page">
+        <v-toolbar class="email-config-toolbar" color="surface" flat>
+          <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" @click="closeChatSettingsPage" />
+          <v-toolbar-title id="chat-emotion-title">Miku 的情绪状态</v-toolbar-title>
+          <v-btn icon="mdi-close" variant="text" aria-label="关闭情绪状态" @click="closeChatSettingsPage" />
+        </v-toolbar>
+        <v-divider />
+        <v-card-text class="email-config-content">
+          <ChatEmotionOverview v-if="route.query.settings === 'emotion'" />
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+    <v-dialog :model-value="aiProfileDialogOpen" :close-on-back="false" persistent fullscreen transition="dialog-bottom-transition">
       <v-card class="ai-profile-page">
         <v-toolbar class="email-config-toolbar" color="surface" flat>
           <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="aiProfileSaving"
-            @click="closeAiProfileDialog" />
+            @click="closeChatSettingsPage" />
           <v-toolbar-title>个人资料</v-toolbar-title>
           <v-btn icon="mdi-close" variant="text" aria-label="关闭个人资料"
-            :disabled="aiProfileSaving" @click="closeAiProfileDialog" />
+            :disabled="aiProfileSaving" @click="closeChatSettingsPage" />
         </v-toolbar>
         <v-divider />
         <v-card-text class="ai-profile-content">
@@ -252,7 +266,7 @@
                 <span>{{ aiProfileSaveError }}</span>
               </div>
               <div class="ai-profile-actions">
-                <v-btn variant="text" :disabled="aiProfileSaving" @click="closeAiProfileDialog">取消</v-btn>
+                <v-btn variant="text" :disabled="aiProfileSaving" @click="closeChatSettingsPage">取消</v-btn>
                 <v-btn color="primary" :loading="aiProfileSaving" :disabled="!canSaveAiProfile"
                   prepend-icon="mdi-content-save-outline" @click="saveAiProfile">保存资料</v-btn>
               </div>
@@ -261,14 +275,14 @@
         </v-card-text>
       </v-card>
     </v-dialog>
-    <v-dialog v-model="serviceConnectionsDialogOpen" persistent fullscreen transition="dialog-bottom-transition">
+    <v-dialog :model-value="serviceConnectionsDialogOpen" :close-on-back="false" persistent fullscreen transition="dialog-bottom-transition">
       <v-card class="email-config-page">
         <v-toolbar class="email-config-toolbar" color="surface" flat>
           <v-btn icon="mdi-arrow-left" variant="text" aria-label="返回聊天" :disabled="serviceConnectionsBusy"
-            @click="closeServiceConnectionsDialog" />
+            @click="closeChatSettingsPage" />
           <v-toolbar-title>第三方服务授权</v-toolbar-title>
           <v-btn icon="mdi-close" variant="text" aria-label="关闭第三方服务授权"
-            :disabled="serviceConnectionsBusy" @click="closeServiceConnectionsDialog" />
+            :disabled="serviceConnectionsBusy" @click="closeChatSettingsPage" />
         </v-toolbar>
         <v-divider />
         <v-tabs :model-value="serviceConnectionTab" class="service-connections-tabs" color="secondary" grow
@@ -802,6 +816,7 @@ type ToolCallStatus = 'running' | 'success' | 'error'
 type MailField = 'displayName' | 'endpoint' | 'username' | 'password'
 type MailEditorMode = 'none' | 'create' | 'edit'
 type ServiceConnectionTab = 'oauth' | 'email' | 'subscriptions'
+type ChatSettingsPage = 'emotion' | 'profile' | 'services'
 interface OutlookStatusPresentation {
   label: string
   color: 'success' | 'secondary' | 'warning' | 'error' | undefined
@@ -912,7 +927,7 @@ const messagesTotal = ref(0)
 const activeRunId = ref<string | null>(null)
 const creatingThread = ref(false)
 const clearContextDialogOpen = ref(false)
-const serviceConnectionsDialogOpen = ref(false)
+const serviceConnectionsDialogOpen = computed(() => route.query.settings === 'services')
 const serviceConnectionTab = shallowRef<ServiceConnectionTab>('oauth')
 const oauthServices = ref<OAuthServiceDTO[]>([])
 const oauthServicesLoading = ref(false)
@@ -958,7 +973,8 @@ const mailTouched = reactive<Record<MailField, boolean>>({
   password: false,
 })
 const settingsMenuOpen = ref(false)
-const aiProfileDialogOpen = ref(false)
+const aiProfileDialogOpen = computed(() => route.query.settings === 'profile')
+let aiProfileLoadVersion = 0
 const aiProfileLoading = ref(false)
 const aiProfileSaving = ref(false)
 const aiProfileError = ref('')
@@ -2272,12 +2288,26 @@ const resetServiceConnectionsState = () => {
   pendingMailConfigSelectionId.value = null
 }
 
-const openServiceConnectionsDialog = () => {
+const openChatSettingsPage = (page: ChatSettingsPage) => {
   settingsMenuOpen.value = false
-  resetServiceConnectionsState()
-  serviceConnectionTab.value = 'oauth'
-  serviceConnectionsDialogOpen.value = true
-  void loadOAuthServices()
+  void router.push({
+    query: { ...route.query, settings: page },
+    hash: route.hash,
+    state: { openedChatSettings: true },
+  })
+}
+
+const closeChatSettingsPage = () => {
+  if (router.options.history.state.openedChatSettings === true) {
+    router.back()
+    return
+  }
+
+  void router.replace({ query: { ...route.query, settings: undefined }, hash: route.hash })
+}
+
+const performCloseServiceConnectionsDialog = () => {
+  if (serviceConnectionsDialogOpen.value) closeChatSettingsPage()
 }
 
 const resetAiProfileForm = () => {
@@ -2302,39 +2332,22 @@ const canSaveAiProfile = computed(() => {
   return !aiProfileForm.birthday || /^\d{4}-\d{2}-\d{2}$/.test(aiProfileForm.birthday)
 })
 
-const openAiProfileDialog = () => {
-  settingsMenuOpen.value = false
-  aiProfileDialogOpen.value = true
-  aiProfileLoading.value = true
-  aiProfileError.value = ''
-  aiProfileSaveError.value = ''
-  aiProfileSuccess.value = false
-  resetAiProfileForm()
-  void loadAiProfile()
-}
-
 const loadAiProfile = async () => {
+  const loadVersion = aiProfileLoadVersion
   aiProfileLoading.value = true
-  aiProfileError.value = ''
   try {
-    applyAiProfile(await accountApi.queryAiUserProfile())
+    const profile = await accountApi.queryAiUserProfile()
+    if (loadVersion === aiProfileLoadVersion) applyAiProfile(profile)
   } catch (error) {
+    if (loadVersion !== aiProfileLoadVersion) return
     if (handleUnauthorized(error)) {
-      aiProfileDialogOpen.value = false
+      closeChatSettingsPage()
       return
     }
     aiProfileError.value = isApiError(error) ? error.message : '个人资料加载失败，请稍后重试。'
   } finally {
-    aiProfileLoading.value = false
+    if (loadVersion === aiProfileLoadVersion) aiProfileLoading.value = false
   }
-}
-
-const closeAiProfileDialog = () => {
-  if (aiProfileSaving.value) return
-  aiProfileDialogOpen.value = false
-  aiProfileError.value = ''
-  aiProfileSaveError.value = ''
-  aiProfileSuccess.value = false
 }
 
 const saveAiProfile = async () => {
@@ -2353,7 +2366,7 @@ const saveAiProfile = async () => {
     aiProfileSuccess.value = true
   } catch (error) {
     if (handleUnauthorized(error)) {
-      aiProfileDialogOpen.value = false
+      closeChatSettingsPage()
       return
     }
     aiProfileSaveError.value = isApiError(error) ? error.message : '个人资料保存失败，请稍后重试。'
@@ -2405,16 +2418,19 @@ const requestServiceConnectionTab = (value: unknown) => {
   switchTab()
 }
 
-const performCloseServiceConnectionsDialog = () => {
-  serviceConnectionsDialogOpen.value = false
-  serviceConnectionTab.value = 'oauth'
-  resetServiceConnectionsState()
-}
+onBeforeRouteUpdate((to, from) => {
+  if (to.query.settings === from.query.settings || authRequired.value) return
+  if (from.query.settings === 'profile' && aiProfileSaving.value) return false
+  if (from.query.settings !== 'services') return
+  if (serviceConnectionsBusy.value) return false
+  if (!mailFormDirty.value) return
 
-const closeServiceConnectionsDialog = () => {
-  if (serviceConnectionsBusy.value) return
-  runAfterMailDiscard(performCloseServiceConnectionsDialog)
-}
+  runAfterMailDiscard(() => {
+    resetMailEditor()
+    closeChatSettingsPage()
+  })
+  return false
+})
 
 const clearContext = async () => {
   const conversation = currentConversation.value
@@ -2486,6 +2502,23 @@ const sendMessage = async () => {
   }
 }
 onMounted(async () => {
+  watch(() => route.query.settings, (page, previousPage) => {
+    if (page === 'profile' || previousPage === 'profile') {
+      aiProfileLoadVersion += 1
+      aiProfileError.value = ''
+      aiProfileSaveError.value = ''
+      aiProfileSuccess.value = false
+      if (page === 'profile') {
+        resetAiProfileForm()
+        void loadAiProfile()
+      }
+    }
+    if (page === 'services' || previousPage === 'services') {
+      serviceConnectionTab.value = 'oauth'
+      resetServiceConnectionsState()
+      if (page === 'services') void loadOAuthServices()
+    }
+  }, { immediate: true })
   window.addEventListener('focus', refreshOAuthServicesOnFocus)
   await loadConversations()
   await loadMessages()

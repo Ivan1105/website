@@ -1,12 +1,7 @@
 <template>
-  <div class="emotion-page site-container">
-    <v-btn :to="chatLink" variant="text" color="secondary" prepend-icon="mdi-arrow-left">返回聊天</v-btn>
-
+  <div class="emotion-overview">
     <header class="emotion-heading">
-      <div>
-        <h1>Miku 的情绪状态</h1>
-        <p class="muted">查看此刻的五维情绪与近期变化。</p>
-      </div>
+      <p class="muted">查看此刻的五维情绪与近期变化。</p>
       <v-btn v-if="appStore.isLoggedIn" variant="tonal" color="secondary"
         prepend-icon="mdi-refresh" :loading="loading" @click="refresh">
         刷新
@@ -40,7 +35,7 @@
           <p class="muted">计算于 <time :datetime="overview.asOf">{{ formatTime(overview.asOf) }}</time></p>
         </div>
         <figure v-if="radar" class="emotion-radar">
-          <svg viewBox="0 0 360 290" role="img" :aria-label="radar.label" aria-describedby="emotion-radar-scale">
+          <svg viewBox="0 0 360 290" role="img" :aria-label="radar.label">
             <g class="radar-grid">
               <polygon v-for="ring in radarRings" :key="ring" :points="ring" />
               <line v-for="axis in radarAxes" :key="axis.key"
@@ -52,12 +47,9 @@
             <text v-for="axis in radar.axes" :key="axis.key" class="radar-label"
               :x="axis.labelPosition.x" :y="axis.labelPosition.y" :text-anchor="axis.anchor">
               {{ axis.label }}
-              <tspan class="radar-value" :x="axis.labelPosition.x" dy="20">{{ axis.value }}</tspan>
+              <tspan class="radar-level" :x="axis.labelPosition.x" dy="20">{{ axis.level }}</tspan>
             </text>
           </svg>
-          <figcaption id="emotion-radar-scale" class="muted">
-            愉悦度范围为 −1 至 1，其余维度为 0 至 1。越靠外，数值越高。
-          </figcaption>
         </figure>
       </section>
 
@@ -72,12 +64,17 @@
             <time :datetime="entry.appliedAt">{{ formatTime(entry.appliedAt) }}</time>
             <div>
               <p class="event-categories">{{ entry.categories.map(category => categoryLabels[category]).join('、') }}</p>
-              <ul class="event-deltas" aria-label="五维变化量">
-                <template v-for="dimension in dimensions" :key="dimension.key">
-                  <li v-if="entry.delta[dimension.key] !== 0">
-                    {{ dimension.label }} <strong>{{ formatDelta(entry.delta[dimension.key]) }}</strong>
-                  </li>
-                </template>
+              <ul class="event-deltas" aria-label="各维度的变化">
+                <li v-for="dimension in dimensions" :key="dimension.key">
+                  <span>{{ dimension.label }}</span>
+                  <span v-if="entry.delta[dimension.key] === 0" class="event-delta-unchanged">没有变化</span>
+                  <strong v-else :class="entry.delta[dimension.key] > 0 ? 'text-success' : 'text-error'">
+                    {{ describeDelta(entry.delta[dimension.key], dimension.min) }}
+                    <span aria-hidden="true">
+                      {{ entry.delta[dimension.key] > 0 ? '↑' : '↓' }}
+                    </span>
+                  </strong>
+                </li>
               </ul>
             </div>
           </li>
@@ -92,26 +89,21 @@ import { useChatApi, type EmotionCategoryDTO, type EmotionOverviewDTO, type Emot
 import { isApiError } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 
-useHead({ title: 'Miku 的情绪状态' })
-
-const route = useRoute()
 const appStore = useAppStore()
 const { chatApi } = useChatApi()
-const chatLink = computed(() => ({
-  path: '/chatbox',
-  query: {
-    agent: typeof route.query.agent === 'string' ? route.query.agent : undefined,
-    thread: typeof route.query.thread === 'string' ? route.query.thread : undefined,
-  },
-}))
 
 const dimensions = [
-  { key: 'valence', label: '愉悦度', min: -1 },
-  { key: 'energy', label: '活跃度', min: 0 },
-  { key: 'affection', label: '互动温暖度', min: 0 },
-  { key: 'curiosity', label: '好奇度', min: 0 },
-  { key: 'excitement', label: '兴奋度', min: 0 },
-] as const satisfies ReadonlyArray<{ key: keyof EmotionValuesDTO; label: string; min: number }>
+  { key: 'valence', label: '愉悦度', min: -1, levels: ['低落', '略显低落', '平和', '愉快', '很愉快'] },
+  { key: 'energy', label: '活跃度', min: 0, levels: ['安静', '较安静', '适中', '活跃', '很活跃'] },
+  { key: 'affection', label: '互动温暖度', min: 0, levels: ['疏离', '较克制', '自然', '亲切', '很亲切'] },
+  { key: 'curiosity', label: '好奇度', min: 0, levels: ['兴趣较低', '略感兴趣', '有些好奇', '很感兴趣', '强烈好奇'] },
+  { key: 'excitement', label: '兴奋度', min: 0, levels: ['很平静', '较平静', '略有兴奋', '兴奋', '很兴奋'] },
+] as const satisfies ReadonlyArray<{
+  key: keyof EmotionValuesDTO
+  label: string
+  min: number
+  levels: readonly [string, string, string, string, string]
+}>
 
 const categoryLabels: Record<EmotionCategoryDTO, string> = {
   shared_joy: '分享喜悦',
@@ -125,12 +117,12 @@ const categoryLabels: Record<EmotionCategoryDTO, string> = {
 
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
 const formatTime = (value: string) => timeFormat.format(new Date(value))
-const formatValue = (value: number) => (Math.abs(value) < 0.005 ? 0 : value).toFixed(2)
-const formatDelta = (value: number) => {
-  const sign = value > 0 ? '+' : '−'
-  return Math.abs(value) < 0.001
-    ? `${sign}<0.001`
-    : `${sign}${Math.abs(value).toFixed(3)}`
+const describeDelta = (delta: number, min: number) => {
+  const magnitude = Math.abs(delta) / (1 - min)
+  const direction = delta > 0 ? '上升' : '下降'
+  if (magnitude >= 0.1) return `大幅${direction}`
+  if (magnitude >= 0.03) return `明显${direction}`
+  return `略有${direction}`
 }
 
 const overview = ref<EmotionOverviewDTO>()
@@ -156,7 +148,7 @@ const radarAxes = dimensions.map((dimension, index) => {
   } as const
 })
 
-const radarRings = [0.25, 0.5, 0.75, 1].map(scale => radarAxes.map(axis => {
+const radarRings = [0.2, 0.4, 0.6, 0.8, 1].map(scale => radarAxes.map(axis => {
   const { x, y } = radarPoint(axis.angle, radarRadius * scale)
   return `${x},${y}`
 }).join(' '))
@@ -167,14 +159,16 @@ const radar = computed(() => {
 
   const axes = radarAxes.map(axis => {
     const value = state.current[axis.key]
-    const scale = (value - axis.min) / (1 - axis.min)
-    return { ...axis, value: formatValue(value), point: radarPoint(axis.angle, radarRadius * scale) }
+    const scale = Math.min(1, Math.max(0, (value - axis.min) / (1 - axis.min)))
+    const levelIndex = Math.min(axis.levels.length - 1, Math.floor(scale * axis.levels.length))
+    const level = axis.levels[levelIndex] ?? axis.levels[0]
+    return { ...axis, level, point: radarPoint(axis.angle, radarRadius * scale) }
   })
 
   return {
     axes,
     points: axes.map(({ point }) => `${point.x},${point.y}`).join(' '),
-    label: `五维情绪雷达图。${axes.map(axis => `${axis.label} ${axis.value}`).join('，')}`,
+    label: `五维情绪雷达图。${axes.map(axis => `${axis.label}：${axis.level}`).join('，')}`,
   }
 })
 
@@ -210,9 +204,8 @@ onBeforeUnmount(() => activeRequest?.abort())
 </script>
 
 <style scoped>
-.emotion-page { max-width: 1050px; padding-block: clamp(20px, 4vw, 48px); }
-.emotion-heading { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin: 22px 0; }
-.emotion-heading h1 { font-size: clamp(1.8rem, 5vw, 2.75rem); line-height: 1.15; margin-bottom: 8px; }
+.emotion-overview { max-width: 1050px; margin-inline: auto; }
+.emotion-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 22px; }
 .emotion-panel, .emotion-state { margin-bottom: 18px; padding: clamp(16px, 3vw, 26px); }
 .emotion-state { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .section-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: baseline; margin-bottom: 16px; }
@@ -220,19 +213,33 @@ onBeforeUnmount(() => activeRequest?.abort())
 .section-heading p { font-size: .88rem; }
 .emotion-radar { width: min(100%, 420px); margin-inline: auto; }
 .emotion-radar svg { display: block; width: 100%; height: auto; }
-.emotion-radar figcaption { font-size: .82rem; text-align: center; }
 .radar-grid { fill: none; stroke: rgb(var(--v-theme-on-surface)); stroke-opacity: .2; }
 .radar-shape { fill: rgb(57 197 187 / .24); stroke: #39c5bb; stroke-width: 2.5; stroke-linejoin: round; }
 .radar-point { fill: #39c5bb; stroke: rgb(var(--v-theme-surface)); stroke-width: 1.5; }
 .radar-label { fill: rgb(var(--v-theme-on-surface)); font-size: 13px; }
-.radar-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.radar-level { font-size: 16px; font-weight: 700; }
 .emotion-timeline, .event-deltas { list-style: none; padding: 0; }
-.timeline-entry { display: grid; grid-template-columns: minmax(130px, 1fr) 4fr; gap: 6px 16px; border-top: 1px solid var(--site-border); padding: 14px 0; }
+.timeline-entry {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(0, 4fr);
+  align-items: baseline;
+  gap: 6px 16px;
+  border-top: 1px solid var(--site-border);
+  padding: 14px 0;
+}
 .timeline-entry:last-child { padding-bottom: 0; }
 .timeline-entry time { color: var(--site-muted); font-size: .87rem; }
-.event-categories { font-weight: 650; }
-.event-deltas { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 5px; font-size: .85rem; color: var(--site-muted); }
-.event-deltas strong { color: rgb(var(--v-theme-on-surface)); font-variant-numeric: tabular-nums; }
+.event-categories { margin: 0; font-weight: 650; }
+.event-deltas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
+  gap: 8px 14px;
+  margin-top: 5px;
+  font-size: .85rem;
+  color: var(--site-muted);
+}
+.event-deltas li { display: grid; gap: 2px; }
+.event-delta-unchanged { color: #6b7280; }
 .empty-timeline { padding: 8px 0; }
 
 @media (max-width: 600px) {
