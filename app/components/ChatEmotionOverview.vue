@@ -58,27 +58,32 @@
           <h2 id="emotion-history">近期变化</h2>
           <p class="muted">最近 7 天 · 最多 30 条</p>
         </div>
-        <p v-if="!overview.timeline.length" class="empty-timeline muted">最近 7 天没有记录到情绪事件。</p>
-        <ol v-else class="emotion-timeline">
-          <li v-for="(entry, index) in overview.timeline" :key="index" class="timeline-entry">
-            <time :datetime="entry.appliedAt">{{ formatTime(entry.appliedAt) }}</time>
-            <div>
-              <p class="event-categories">{{ entry.categories.map(category => categoryLabels[category]).join('、') }}</p>
-              <ul class="event-deltas" aria-label="各维度的变化">
-                <li v-for="dimension in dimensions" :key="dimension.key">
-                  <span>{{ dimension.label }}</span>
-                  <span v-if="entry.delta[dimension.key] === 0" class="event-delta-unchanged">没有变化</span>
-                  <strong v-else :class="entry.delta[dimension.key] > 0 ? 'text-success' : 'text-error'">
-                    {{ describeDelta(entry.delta[dimension.key], dimension.min) }}
-                    <span aria-hidden="true">
-                      {{ entry.delta[dimension.key] > 0 ? '↑' : '↓' }}
-                    </span>
-                  </strong>
-                </li>
-              </ul>
-            </div>
-          </li>
-        </ol>
+        <p v-if="!timeline.length" class="empty-timeline muted">最近 7 天没有记录到情绪事件。</p>
+        <div v-else class="emotion-timeline-scroll" tabindex="0" role="region" aria-label="情绪变化记录">
+          <table class="emotion-timeline" aria-labelledby="emotion-history">
+            <thead>
+              <tr>
+                <th scope="col" class="timeline-time">时间</th>
+                <th scope="col" class="timeline-event">事件</th>
+                <th v-for="dimension in dimensions" :key="dimension.key" scope="col">{{ dimension.label }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(entry, index) in timeline" :key="index">
+                <td class="timeline-time"><time :datetime="entry.appliedAt">{{ formatTime(entry.appliedAt) }}</time></td>
+                <th scope="row" class="timeline-event">{{ entry.categories.map(category => categoryLabels[category]).join('、') }}</th>
+                <td v-for="change in entry.changes" :key="change.key">
+                  <span role="img" class="timeline-indicator" :class="change.color" :aria-label="change.label">
+                    <template v-if="change.icon">
+                      <v-icon v-for="arrow in change.count" :key="arrow" :icon="change.icon" size="16" aria-hidden="true" />
+                    </template>
+                    <template v-else>—</template>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </template>
   </div>
@@ -117,15 +122,31 @@ const categoryLabels: Record<EmotionCategoryDTO, string> = {
 
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
 const formatTime = (value: string) => timeFormat.format(new Date(value))
-const describeDelta = (delta: number, min: number) => {
-  const magnitude = Math.abs(delta) / (1 - min)
-  const direction = delta > 0 ? '上升' : '下降'
-  if (magnitude >= 0.1) return `大幅${direction}`
-  if (magnitude >= 0.03) return `明显${direction}`
-  return `略有${direction}`
-}
-
 const overview = ref<EmotionOverviewDTO>()
+const timeline = computed(() => {
+  const state = overview.value
+  if (state?.status !== 'active') return []
+
+  return state.timeline.map(entry => ({
+    ...entry,
+    changes: dimensions.map(({ key, min }) => {
+      const delta = entry.delta[key]
+      if (delta === 0) return { key, icon: null, count: 0, color: 'timeline-unchanged', label: '没有变化' }
+
+      const magnitude = Math.abs(delta) / (1 - min)
+      const level = magnitude >= 0.1 ? 3 : magnitude >= 0.03 ? 2 : 1
+      const rising = delta > 0
+      return {
+        key,
+        icon: rising ? 'mdi-arrow-up-bold' : 'mdi-arrow-down-bold',
+        count: level,
+        color: rising ? 'text-success' : 'text-error',
+        label: `${(['略有', '明显', '大幅'] as const)[level - 1]}${rising ? '上升' : '下降'}`,
+      }
+    }),
+  }))
+})
+
 const radarCenter = { x: 180, y: 148 }
 const radarRadius = 94
 
@@ -218,31 +239,20 @@ onBeforeUnmount(() => activeRequest?.abort())
 .radar-point { fill: #39c5bb; stroke: rgb(var(--v-theme-surface)); stroke-width: 1.5; }
 .radar-label { fill: rgb(var(--v-theme-on-surface)); font-size: 13px; }
 .radar-level { font-size: 16px; font-weight: 700; }
-.emotion-timeline, .event-deltas { list-style: none; padding: 0; }
-.timeline-entry {
-  display: grid;
-  grid-template-columns: minmax(130px, 1fr) minmax(0, 4fr);
-  align-items: baseline;
-  gap: 6px 16px;
-  border-top: 1px solid var(--site-border);
-  padding: 14px 0;
-}
-.timeline-entry:last-child { padding-bottom: 0; }
-.timeline-entry time { color: var(--site-muted); font-size: .87rem; }
-.event-categories { margin: 0; font-weight: 650; }
-.event-deltas {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
-  gap: 8px 14px;
-  margin-top: 5px;
+.emotion-timeline-scroll { overflow-x: auto; }
+.emotion-timeline {
+  width: 100%;
+  min-width: 45rem;
+  table-layout: fixed;
+  border-collapse: collapse;
   font-size: .85rem;
-  color: var(--site-muted);
 }
-.event-deltas li { display: grid; gap: 2px; }
-.event-delta-unchanged { color: #6b7280; }
+.emotion-timeline th, .emotion-timeline td { padding: 10px 6px; text-align: center; }
+.emotion-timeline thead th { color: var(--site-muted); font-weight: 650; }
+.emotion-timeline tbody tr { border-top: 1px solid var(--site-border); }
+.emotion-timeline .timeline-time { width: 10rem; color: var(--site-muted); text-align: left; white-space: nowrap; }
+.emotion-timeline .timeline-event { width: 20%; text-align: left; font-weight: 650; }
+.timeline-indicator { display: inline-flex; align-items: center; gap: 2px; font-size: 1rem; }
+.timeline-unchanged { color: #6b7280; }
 .empty-timeline { padding: 8px 0; }
-
-@media (max-width: 600px) {
-  .timeline-entry { grid-template-columns: 1fr; }
-}
 </style>
