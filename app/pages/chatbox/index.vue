@@ -48,16 +48,12 @@
                 class="chat-settings-trigger" :disabled="conversationSelectionDisabled" aria-label="打开设置" />
             </template>
             <v-list class="chat-settings-menu" density="compact" aria-label="聊天设置">
-              <v-list-item class="chat-setting-item settings-toggle-item" prepend-icon="mdi-bell-outline">
+              <v-list-item class="chat-setting-item" prepend-icon="mdi-bell-outline" append-icon="mdi-chevron-right"
+                @click="openChatSettingsPage('proactive')">
                 <v-list-item-title>主动提醒功能</v-list-item-title>
                 <v-list-item-subtitle class="chat-setting-description">
-                  开启后，{{ currentConversation.display_name }}会在合适的时候主动来找你。
+                  {{ currentConversation.proactive_enabled ? '已开启' : '已关闭' }}
                 </v-list-item-subtitle>
-                <template #append>
-                  <v-switch :model-value="currentConversation?.proactive_enabled ?? false" color="secondary"
-                    density="compact" hide-details :loading="proactiveUpdating" :disabled="proactiveUpdating"
-                    aria-label="主动提醒功能" @click.stop @update:model-value="updateProactiveReminder" />
-                </template>
               </v-list-item>
               <v-list-item class="chat-setting-item" prepend-icon="mdi-account-edit-outline"
                 @click="openChatSettingsPage('profile')">
@@ -205,6 +201,9 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+    <ChatProactiveSettings v-if="route.query.settings === 'proactive' && currentConversation && !authRequired"
+      :key="currentConversation.name" :agent-id="currentConversation.name" :agent-name="currentConversation.display_name"
+      :handle-unauthorized="handleUnauthorized" @close="closeChatSettingsPage" @loaded="refreshProactiveStatus" />
     <v-dialog :model-value="route.query.settings === 'emotion'" :close-on-back="false" persistent fullscreen
       transition="dialog-bottom-transition" aria-labelledby="chat-emotion-title">
       <v-card class="email-config-page">
@@ -816,7 +815,7 @@ type ToolCallStatus = 'running' | 'success' | 'error'
 type MailField = 'displayName' | 'endpoint' | 'username' | 'password'
 type MailEditorMode = 'none' | 'create' | 'edit'
 type ServiceConnectionTab = 'oauth' | 'email' | 'subscriptions'
-type ChatSettingsPage = 'emotion' | 'profile' | 'services'
+type ChatSettingsPage = 'emotion' | 'profile' | 'services' | 'proactive'
 interface OutlookStatusPresentation {
   label: string
   color: 'success' | 'secondary' | 'warning' | 'error' | undefined
@@ -981,7 +980,6 @@ const aiProfileError = ref('')
 const aiProfileSaveError = ref('')
 const aiProfileSuccess = ref(false)
 const aiProfileForm = reactive<AiProfileForm>({ nickname: '', cityname: '', timezone: '', birthday: '' })
-const proactiveUpdating = ref(false)
 const drawerOpen = ref(false)
 const snackbar = reactive({ show: false, text: '', timeout: 6000 })
 const showError = (text: string) => {
@@ -2235,21 +2233,9 @@ watch([() => route.query.thread, () => route.query.agent], async ([thread, agent
   await loadMessages()
 })
 
-const updateProactiveReminder = async (value: boolean | null) => {
-  const conversation = currentConversation.value
-  if (!conversation || proactiveUpdating.value) return
-  const enabled = Boolean(value)
-  if (enabled === conversation.proactive_enabled) return
-
-  proactiveUpdating.value = true
-  try {
-    await chatApi.updateProactive({ agentId: conversation.name, enabled })
-    conversation.proactive_enabled = enabled
-  } catch (error) {
-    if (!handleUnauthorized(error)) showError('主动提醒设置失败，请稍后重试。')
-  } finally {
-    proactiveUpdating.value = false
-  }
+const refreshProactiveStatus = (settings: { agentId: string; enabled: boolean }) => {
+  const conversation = conversations.value.find(item => item.name === settings.agentId)
+  if (conversation) conversation.proactive_enabled = settings.enabled
 }
 
 const openClearContextDialog = () => {
@@ -2645,15 +2631,6 @@ onBeforeUnmount(() => {
 .chat-setting-item :deep(.v-list-item__prepend) {
   align-self: start;
   padding-top: 3px;
-}
-
-.settings-toggle-item :deep(.v-list-item__append) {
-  align-self: center;
-  margin-inline-start: var(--site-space-3);
-}
-
-.settings-toggle-item :deep(.v-switch) {
-  flex: 0 0 auto;
 }
 
 .email-config-page {

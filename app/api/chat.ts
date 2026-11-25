@@ -84,6 +84,24 @@ export interface SendMessageDTO {
 export interface UpdateProactiveReq {
   agentId: string
   enabled: boolean
+  intervalMinutes?: number
+  cooldownMinutes?: number
+  allowedWindow?: ProactiveAllowedWindow | null
+}
+
+export interface ProactiveAllowedWindow {
+  start: string
+  end: string
+}
+
+export interface ProactiveSettingsDTO {
+  agentId: string
+  enabled: boolean
+  intervalMinutes: number
+  cooldownMinutes: number
+  allowedWindow: ProactiveAllowedWindow | null
+  jobId: number | null
+  nextRunAt: string | null
 }
 
 export interface CreateThreadDTO {
@@ -193,12 +211,20 @@ export const useChatApi = () => {
       return unwrap(resp)
     },
 
-    async updateProactive(req: UpdateProactiveReq): Promise<void> {
-      const resp = await $api<unknown>('/chatbox/proactive', {
+    async getProactiveSettings(agentId: string, signal?: AbortSignal): Promise<ProactiveSettingsDTO> {
+      const resp = await $api<ProactiveSettingsDTO | Envelope<ProactiveSettingsDTO>>('/chatbox/proactive', {
+        query: { agentId },
+        signal,
+      })
+      return unwrap(resp)
+    },
+
+    async updateProactive(req: UpdateProactiveReq): Promise<ProactiveSettingsDTO> {
+      const resp = await $api<ProactiveSettingsDTO | Envelope<ProactiveSettingsDTO>>('/chatbox/proactive', {
         method: 'POST',
         body: req,
       })
-      unwrap(resp)
+      return unwrap(resp)
     },
 
     async sendMessage(data: SendMessageReq): Promise<SendMessageDTO> {
