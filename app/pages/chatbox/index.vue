@@ -140,9 +140,22 @@
                 </v-avatar>
                 <div class="message-bubble-wrapper">
                   <span class="message-author">{{ msg.role === 'user' ? '我' : currentConversation?.display_name }}</span>
-                  <div class="message-bubble" :class="msg.role === 'user' ? 'bubble-self' : 'bubble-other'">
+                  <div class="message-bubble" :class="{
+                    'bubble-self': msg.role === 'user',
+                    'bubble-other': msg.role !== 'user',
+                    'bubble-images-only': msg.role === 'user' && msg.attachments?.length && !msg.content.trim(),
+                  }">
                     <div v-if="msg.loading && !msg.content && !msg.toolCalls?.length" class="reply-loading" role="status"><v-progress-circular indeterminate size="18" width="2" color="secondary" /> 正在回复…</div>
-                    <p v-else-if="msg.role === 'user'" class="message-text">{{ msg.content }}</p>
+                    <template v-else-if="msg.role === 'user'">
+                      <div v-if="msg.attachments?.length" class="chat-message-images">
+                        <button v-for="(attachment, index) in msg.attachments" :key="index" type="button"
+                          :aria-label="`预览聊天图片 ${index + 1}`" aria-haspopup="dialog"
+                          @click="openImagePreview(msg.attachments, index, $event)">
+                          <img :src="attachment.url" :alt="`聊天图片 ${index + 1}`" loading="lazy" />
+                        </button>
+                      </div>
+                      <p v-if="msg.content.trim()" class="message-text">{{ msg.content }}</p>
+                    </template>
                     <template v-else>
                       <div v-if="msg.content" class="message-text markdown-content" v-html="renderAssistantMessage(msg)" />
                       <section v-if="msg.sources?.length" class="message-sources" aria-label="参考来源">
@@ -180,16 +193,37 @@
           </template>
         </div>
         <div v-if="currentConversation && !authRequired" class="input-area">
+          <ul v-if="selectedImages.length" class="chat-image-drafts" aria-label="待发送图片">
+            <li v-for="image in selectedImages" :key="image.id" class="chat-image-draft">
+              <img :src="image.previewUrl" :alt="image.file.name" />
+              <button type="button" class="chat-image-remove" :aria-label="`移除 ${image.file.name}`"
+                :disabled="submittingMessage" @click="removeSelectedImage(image)">
+                <v-icon icon="mdi-close" size="14" aria-hidden="true" />
+              </button>
+              <div v-if="image.status === 'uploading'" class="chat-image-upload-status" role="status">上传中…</div>
+              <v-btn v-else-if="image.status === 'failed'" size="x-small" class="chat-image-upload-status"
+                :title="image.error" :aria-label="`重试上传 ${image.file.name}`" @click="uploadSelectedImage(image)">重试</v-btn>
+            </li>
+          </ul>
+          <div class="input-tools">
+            <input ref="imageInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden @change="onImageSelection" />
+            <v-btn type="button" icon="mdi-image-plus-outline" size="small" variant="text" aria-label="添加图片"
+              :disabled="loading || creatingThread || submittingMessage || selectedImages.length >= MAX_CHAT_IMAGES"
+              @click="imageInput?.click()" />
+          </div>
           <form class="input-row" @submit.prevent="sendMessage">
             <v-textarea id="chat-message" v-model="inputMessage" placeholder="输入你的想法…" auto-grow rows="1" max-rows="5"
-              hide-details class="message-input" :disabled="loading || creatingThread" @keydown="onMessageKeydown" />
-            <v-btn type="submit" color="primary" :disabled="!inputMessage.trim() || busy" class="send-btn"
-              :prepend-icon="sending ? 'mdi-dots-horizontal' : 'mdi-send-outline'">{{ sending ? '回复中' : '发送' }}</v-btn>
+              hide-details class="message-input" :disabled="loading || creatingThread || submittingMessage"
+              @keydown="onMessageKeydown" @paste="onImagePaste" />
+            <v-btn type="submit" color="primary" :disabled="!canSendMessage" class="send-btn"
+              :prepend-icon="sending ? 'mdi-dots-horizontal' : 'mdi-send-outline'">{{ submittingMessage ? '发送中' : sending ? '回复中' : '发送' }}</v-btn>
           </form>
           <div class="input-note"><span>Enter 发送 · Shift + Enter 换行</span><span role="status" aria-live="polite">{{ sending ? '正在接收回复…' : '' }}</span></div>
         </div>
       </section>
     </div>
+    <ChatImagePreview v-if="imagePreview" :images="imagePreview.urls" :thumbnails="imagePreview.thumbnails"
+      :initial-index="imagePreview.index" @closed="finishImagePreview" />
     <v-dialog v-model="clearContextDialogOpen" :persistent="creatingThread" max-width="440">
       <v-card>
         <v-card-title>新建会话</v-card-title>
@@ -792,6 +826,8 @@
 </template>
 
 <script setup lang="ts">
+import { useCommonApi } from '@/api/common'
+import { MAX_CHAT_IMAGE_BYTES, prepareClipboardImage } from '@/utils/chat-clipboard-image'
 import { isApiError, useAccountApi, useChatApi, useMailApi, useOAuthApi, type ActiveRunDTO, type AiUserProfileDTO, type ChatRunStreamEvent, type ConversationDTO, type CreateImapConfigReq, type ImapConfigDTO, type ImapSubscriptionData, type ImapSubscriptionStatus, type MailAccountDTO, type MailEndpointDTO, type MessageDTO, type MessageSourceDTO, type OAuthServiceDTO, type OutlookSubscriptionData, type OutlookSubscriptionStatus, type UpdateImapConfigReq } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
@@ -801,6 +837,7 @@ import MarkdownIt from 'markdown-it'
 
 useSeoMeta({ title: '聊天 · Ivan1105' })
 const { chatApi } = useChatApi()
+const { commonApi } = useCommonApi()
 const { accountApi } = useAccountApi()
 const { mailApi } = useMailApi()
 const { oauthApi } = useOAuthApi()
@@ -908,7 +945,40 @@ const renderAssistantMessage = (message: Message) => {
 const conversations = ref<ConversationDTO[]>([])
 const currentConversationId = ref('')
 const currentMessages = ref<Message[]>([])
+const imagePreview = shallowRef<{
+  urls: string[]
+  thumbnails: HTMLImageElement[]
+  index: number
+  trigger: HTMLButtonElement
+} | null>(null)
+
+function openImagePreview(attachments: NonNullable<Message['attachments']>, index: number, event: MouseEvent) {
+  if (!(event.currentTarget instanceof HTMLButtonElement)) return
+  const trigger = event.currentTarget
+  const thumbnails = Array.from(trigger.parentElement?.querySelectorAll<HTMLImageElement>('button > img') ?? [])
+  imagePreview.value = { urls: attachments.map(({ url }) => url), thumbnails, index, trigger }
+}
+
+function finishImagePreview() {
+  imagePreview.value?.trigger.focus({ preventScroll: true })
+  imagePreview.value = null
+}
+
 const inputMessage = ref('')
+const imageInput = ref<HTMLInputElement | null>(null)
+const MAX_CHAT_IMAGES = 4
+interface ChatImageDraft {
+  id: string
+  file: File
+  fromClipboard: boolean
+  previewUrl: string
+  status: 'uploading' | 'uploaded' | 'failed'
+  url?: string
+  error?: string
+}
+const imageDrafts = reactive(new Map<string, ChatImageDraft[]>())
+const selectedImages = computed(() => imageDrafts.get(currentConversationId.value) ?? [])
+const submittingMessage = ref(false)
 const messagesAreaRef = ref<HTMLElement | null>(null)
 let followingLatestMessages = true
 const loading = ref(false)
@@ -1063,6 +1133,9 @@ const mailConfigUpdatedAt = computed(() => {
   }).format(date)
 })
 const busy = computed(() => authRequired.value || sending.value || creatingThread.value || loading.value || conversationsLoading.value)
+const canSendMessage = computed(() => !busy.value && !submittingMessage.value
+  && Boolean(inputMessage.value.trim() || selectedImages.value.length)
+  && selectedImages.value.every(image => image.status === 'uploaded'))
 const oauthActionPending = computed(() => oauthAuthorizingAppKey.value !== null || oauthRevokingAppKey.value !== null)
 const outlookAuthorized = computed(() => outlookAccount.value?.status === 'available')
 const outlookNeedsReauthorization = computed(() => outlookSubscription.value?.status === 'reauthorization_required')
@@ -1108,7 +1181,7 @@ const serviceConnectionsBusy = computed(() => mailConfigBusy.value
   || oauthActionPending.value
   || outlookSubscriptionUpdating.value
   || imapSubscriptionUpdating.value)
-const conversationSelectionDisabled = computed(() => authRequired.value || creatingThread.value || loading.value || conversationsLoading.value)
+const conversationSelectionDisabled = computed(() => authRequired.value || submittingMessage.value || creatingThread.value || loading.value || conversationsLoading.value)
 const historyLoaderLabel = computed(() => `加载更早的消息，当前已显示 ${currentMessages.value.length} 条，共 ${messagesTotal.value} 条`)
 const MESSAGES_PAGE_SIZE = 20
 let messagesLoadVersion = 0
@@ -2447,22 +2520,97 @@ const onMessageKeydown = (event: KeyboardEvent) => {
   void sendMessage()
 }
 
+const uploadSelectedImage = async (image: ChatImageDraft) => {
+  image.status = 'uploading'
+  image.error = undefined
+  try {
+    const file = image.fromClipboard ? await prepareClipboardImage(image.file) : image.file
+    const { path } = await commonApi.uploadImage(file, 'qq-images')
+    image.url = assetUrl(path)
+    image.status = 'uploaded'
+  } catch (error) {
+    image.status = 'failed'
+    image.error = error instanceof Error ? error.message : '图片上传失败，请重试。'
+    if (!handleUnauthorized(error)) showError(image.error)
+  }
+}
+
+const addSelectedImages = (files: File[], fromClipboard = false) => {
+  const conversationId = currentConversationId.value
+  if (!conversationId || loading.value || creatingThread.value || submittingMessage.value) return
+  if (!imageDrafts.has(conversationId)) imageDrafts.set(conversationId, [])
+  const drafts = imageDrafts.get(conversationId)!
+  for (const file of files) {
+    if (drafts.length >= MAX_CHAT_IMAGES) {
+      showError('每条消息最多发送 4 张图片。')
+      break
+    }
+    if (!fromClipboard && !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      showError('聊天图片仅支持 JPEG、PNG、WebP。')
+      continue
+    }
+    if (!file.size || (!fromClipboard && file.size > MAX_CHAT_IMAGE_BYTES)) {
+      showError('图片不能为空或超过 10 MiB。')
+      continue
+    }
+    const draft = reactive<ChatImageDraft>({
+      id: crypto.randomUUID(),
+      file,
+      fromClipboard,
+      previewUrl: URL.createObjectURL(file),
+      status: 'uploading',
+    })
+    drafts.push(draft)
+    void uploadSelectedImage(draft)
+  }
+}
+
+const onImageSelection = (event: Event) => {
+  if (!(event.target instanceof HTMLInputElement)) return
+  addSelectedImages(Array.from(event.target.files ?? []))
+  event.target.value = ''
+}
+
+const onImagePaste = (event: ClipboardEvent) => {
+  const clipboard = event.clipboardData
+  if (!clipboard) return
+  const files = Array.from(clipboard.files).filter(file => file.type.startsWith('image/'))
+  if (!files.length) return
+  if (!clipboard.getData('text/plain')) event.preventDefault()
+  addSelectedImages(files, true)
+}
+
+const removeSelectedImage = (image: ChatImageDraft) => {
+  const drafts = selectedImages.value
+  const index = drafts.findIndex(draft => draft.id === image.id)
+  if (index === -1) return
+  drafts.splice(index, 1)
+  URL.revokeObjectURL(image.previewUrl)
+}
+
+const clearSelectedImages = (conversationId: string) => {
+  for (const image of imageDrafts.get(conversationId) ?? []) URL.revokeObjectURL(image.previewUrl)
+  imageDrafts.delete(conversationId)
+}
+
 const sendMessage = async () => {
   const content = inputMessage.value.trim()
   const conversation = currentConversation.value
-  if (!content || busy.value || !conversation) return
+  if (!canSendMessage.value || !conversation) return
+  const imageUrls = selectedImages.value.flatMap(image => image.url ? [image.url] : [])
+  submittingMessage.value = true
   sending.value = true
   messagesError.value = ''
   const nowIso = new Date().toISOString()
-  currentMessages.value.push({ key: `local:user:${crypto.randomUUID()}`, role: 'user', content, createdAt: nowIso })
-  inputMessage.value = ''
   let replyKey = `local:reply:${crypto.randomUUID()}`
   currentMessages.value.push({ key: replyKey, role: 'assistant', content: '', createdAt: nowIso, loading: true })
   await nextTick()
   scrollToBottom()
   try {
     const threadId = conversation.thread_id
-    const run = await chatApi.sendMessage({ content, agentId: conversation.name, threadId })
+    const run = await chatApi.sendMessage({
+      content, agentId: conversation.name, threadId, imageUrls: imageUrls.length ? imageUrls : undefined,
+    })
     if (currentConversation.value !== conversation || (threadId && run.thread_id !== threadId)) {
       const idx = currentMessages.value.findIndex(message => message.key === replyKey)
       if (idx >= 0 && !currentMessages.value[idx]?.content) currentMessages.value.splice(idx, 1)
@@ -2470,21 +2618,32 @@ const sendMessage = async () => {
       return
     }
     conversation.thread_id = run.thread_id
-    const reply = currentMessages.value.find(message => message.key === replyKey)
-    if (!reply) {
-      sending.value = false
-      return
+    inputMessage.value = ''
+    clearSelectedImages(conversation.name)
+    const replyIndex = currentMessages.value.findIndex(message => message.key === replyKey)
+    const userMessage = toHistoryMessage(run.user_message)
+    const reply = currentMessages.value[replyIndex] ?? {
+      key: replyKey, role: 'assistant' as const, content: '', createdAt: nowIso, loading: true,
     }
     replyKey = `run:${run.run_id}:placeholder`
     reply.key = replyKey
+    if (replyIndex >= 0) currentMessages.value.splice(replyIndex, 1, userMessage, reply)
+    else currentMessages.value.push(userMessage, reply)
     void streamActiveRun(run.run_id, replyKey, run.thread_id)
+    if (route.query.thread !== run.thread_id) {
+      void router.replace({ query: { ...route.query, agent: String(conversation.id), thread: run.thread_id }, hash: route.hash })
+    }
+    await nextTick()
+    scrollToBottom()
   } catch (error) {
     const idx = currentMessages.value.findIndex(message => message.key === replyKey)
     if (idx >= 0 && !currentMessages.value[idx]?.content) currentMessages.value.splice(idx, 1)
-    if (!handleUnauthorized(error)) showError('回复未能完成，请稍后重新发送。')
+    if (!handleUnauthorized(error)) showError(isApiError(error) ? error.message : '消息发送失败，请重试。')
     sending.value = false
     await nextTick()
     scrollToBottom()
+  } finally {
+    submittingMessage.value = false
   }
 }
 onMounted(async () => {
@@ -2510,6 +2669,7 @@ onMounted(async () => {
   await loadMessages()
 })
 onBeforeUnmount(() => {
+  for (const conversationId of imageDrafts.keys()) clearSelectedImages(conversationId)
   window.removeEventListener('focus', refreshOAuthServicesOnFocus)
   setActiveThread(null)
   stopActiveStream()
@@ -3276,6 +3436,13 @@ onBeforeUnmount(() => {
   border-radius: 16px 0 16px 16px;
 }
 
+.message-bubble.bubble-images-only {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
 .message-text {
   font-size: 1rem;
   line-height: 1.8;
@@ -3539,6 +3706,117 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: end;
   gap: 12px;
+}
+
+.input-tools {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.chat-image-drafts,
+.chat-message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-image-drafts {
+  width: max-content;
+  max-width: 100%;
+  list-style: none;
+  padding: 8px;
+  margin: 0 0 8px;
+  border: 1px solid var(--site-border);
+  border-radius: 12px;
+  background: rgb(var(--v-theme-surface));
+}
+
+.chat-image-draft {
+  position: relative;
+}
+
+.chat-image-draft img,
+.chat-message-images img {
+  display: block;
+  border-radius: 8px;
+}
+
+.chat-image-draft img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+}
+
+.chat-image-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(var(--v-theme-surface));
+  color: rgb(var(--v-theme-on-surface));
+  box-shadow: 0 1px 4px rgb(0 0 0 / 22%);
+  cursor: pointer;
+}
+
+.chat-image-remove:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+}
+
+.chat-image-remove:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.chat-image-upload-status {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  border-radius: 4px;
+  background: rgb(var(--v-theme-surface));
+  padding: 2px 4px;
+  font-size: 0.7rem;
+}
+
+.chat-message-images button {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.chat-message-images button:focus-visible {
+  outline-offset: -3px;
+}
+
+.chat-message-images img {
+  max-width: min(100%, 240px);
+  max-height: 240px;
+  object-fit: contain;
+}
+
+.bubble-images-only .chat-message-images button {
+  min-width: 0;
+}
+
+.bubble-images-only .chat-message-images img {
+  max-width: min(380px, calc(100vw - 96px));
+  max-height: 320px;
+  border-radius: 0;
+}
+
+.chat-message-images + .message-text {
+  margin-top: 8px;
 }
 
 .message-input {

@@ -34,6 +34,12 @@ export interface MessageDTO {
   content: string
   createdAt: string
   sources: MessageSourceDTO[]
+  attachments?: ChatImageAttachmentDTO[]
+}
+
+export interface ChatImageAttachmentDTO {
+  url: string
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp'
 }
 
 export interface MessageSourceDTO {
@@ -54,6 +60,7 @@ export interface ActiveRunUserMessageDTO {
   role: 'user'
   content: string
   createdAt: string
+  attachments?: ChatImageAttachmentDTO[]
 }
 
 export interface ActiveRunDTO {
@@ -73,12 +80,14 @@ export interface SendMessageReq {
   content: string
   agentId: string
   threadId?: string
+  imageUrls?: string[]
 }
 
 export interface SendMessageDTO {
   thread_id: string
   run_id: string
   status: 'running'
+  user_message: ActiveRunUserMessageDTO
 }
 
 export interface UpdateProactiveReq {
