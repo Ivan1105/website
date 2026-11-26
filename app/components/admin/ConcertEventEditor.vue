@@ -21,8 +21,8 @@
         <v-text-field v-model.trim="form.slug" label="Slug *" :rules="slugRules" />
         <div class="form-grid">
           <v-autocomplete
-            v-model="form.tour_id" label="所属巡演" :items="tourOptions" item-title="name" item-value="id"
-            clearable :loading="optionLoading.tours" no-data-text="noData.tours" @update:search="searchTours"
+            v-model="form.tour_id" label="所属巡演" :items="tourItems" item-title="name" item-value="id"
+            clearable :loading="optionLoading.tours || selectedTourLoading" no-data-text="noData.tours" @update:search="searchTours"
           />
           <v-autocomplete
             v-model="form.venue_id" label="场地" :items="venueOptions" item-title="name" item-value="id"
@@ -154,6 +154,13 @@ const currentEvent = ref<EventDTO | null>(null)
 const form = reactive<EventFormState>(emptyForm())
 const setlist = ref<EditableSetlistItem[]>([])
 const tourOptions = ref<TourDTO[]>([])
+const selectedTourLoading = ref(false)
+const tourItems = computed(() => {
+  const id = form.tour_id
+  if (id === null || tourOptions.value.some(tour => tour.id === id)) return tourOptions.value
+  const name = selectedTourLoading.value ? '正在加载巡演…' : '巡演名称不可用'
+  return [{ id, name }, ...tourOptions.value]
+})
 const venueOptions = ref<VenueDTO[]>([])
 const songOptions = ref<SongDTO[]>([])
 const visibleSongIds = shallowRef<ReadonlySet<number>>(new Set())
@@ -229,6 +236,7 @@ async function reset() {
     fillCopyForm(props.copySource)
     markUnsavedCopy(version)
   }
+  void loadSelectedTour(form.tour_id, version)
   await Promise.all([loadTours(), loadVenues(), loadSongs()])
   if (version !== resetVersion) return
   if (relationSource) await loadRelations(relationSource.id, version)
@@ -392,6 +400,18 @@ function parseSetlistJson(text: string): SetlistJsonItem[] {
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
 
 async function loadTours(q?: string) { await loadOption('tours', () => concertAdminApi.listTours({ page_size: 50, q }), result => mergeOptions(tourOptions, result.items)) }
+async function loadSelectedTour(id: number | null, version: number) {
+  selectedTourLoading.value = id !== null && !tourOptions.value.some(tour => tour.id === id)
+  if (id === null || !selectedTourLoading.value) return
+  try {
+    const tour = await concertAdminApi.getTour(id)
+    if (version === resetVersion && form.tour_id === id) mergeOptions(tourOptions, [tour])
+  } catch {
+    // Keep the saved relationship editable while its label is unavailable.
+  } finally {
+    if (version === resetVersion) selectedTourLoading.value = false
+  }
+}
 async function loadVenues(q?: string) { await loadOption('venues', () => concertAdminApi.listVenues({ page_size: 50, q }), result => mergeOptions(venueOptions, result.items)) }
 async function loadSongs(q?: string) {
   await loadOption('songs', () => concertAdminApi.listSongs({ page_size: 50, q }), (result) => {
@@ -399,7 +419,12 @@ async function loadSongs(q?: string) {
     mergeOptions(songOptions, result.items)
   })
 }
-function searchTours(value: string) { void loadTours(value?.trim() || undefined) }
+function searchTours(value: string) {
+  const query = value?.trim()
+  const selectedLabel = tourItems.value.find(tour => tour.id === form.tour_id)?.name
+  if (query && query === selectedLabel) return
+  void loadTours(query || undefined)
+}
 function searchVenues(value: string) { void loadVenues(value?.trim() || undefined) }
 function searchSongs(value: string) {
   pendingSongSearch.value = value?.trim() || undefined
